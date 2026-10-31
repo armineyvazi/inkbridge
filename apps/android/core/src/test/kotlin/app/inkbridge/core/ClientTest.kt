@@ -94,6 +94,8 @@ private class FakeHost(private val code: String?) : AutoCloseable {
 
     fun dropConnection() = current?.close()
 
+    fun push(p: Payload) = current?.let { write(it, p) }
+
     override fun close() = server.close()
 }
 
@@ -123,6 +125,7 @@ class InkBridgeClientTest {
             assertEquals(1404, hello.surfaceWidthPx)
             assertEquals(null, hello.auth)
             awaitState(c) { it is ClientState.Ready }
+            assertIs<Payload.CanvasViewport>(host.next().payload, "the tablet's view is sent right after the handshake")
 
             val pt = InkPoint(0.5, 0.5, 0.5, 1)
             c.submit(StylusEvent.Begin("s1", Tool.PEN, pt))
@@ -168,6 +171,7 @@ class InkBridgeClientTest {
             c.start()
             host.next() // hello
             awaitState(c) { it is ClientState.Ready }
+            host.next() // viewport
             host.dropConnection()
             awaitState(c) { it !is ClientState.Ready }
             val started = System.nanoTime()
@@ -175,10 +179,33 @@ class InkBridgeClientTest {
             c.submit(StylusEvent.End("during-outage"))
             awaitState(c) { it is ClientState.Ready }
             val reconnectMs = (System.nanoTime() - started) / 1e6
-            val after = generateSequence { host.received.poll(3, TimeUnit.SECONDS) }.take(2).toList()
+            val after = generateSequence { host.received.poll(3, TimeUnit.SECONDS) }.take(3).toList()
             assertIs<Payload.Hello>(after[0].payload)
-            assertEquals(Payload.StrokeEnd("during-outage"), after[1].payload)
+            assertIs<Payload.CanvasViewport>(after[1].payload)
+            assertEquals(Payload.StrokeEnd("during-outage"), after[2].payload)
             assertTrue(reconnectMs < 3_000, "reconnected in $reconnectMs ms")
+            runBlocking { c.stop() }
+        }
+    }
+
+    @Test
+    fun hostDocumentMessagesReachTheMirrorAndSentStrokesAreReported() {
+        FakeHost(code = null).use { host ->
+            val c = client(host)
+            val got = java.util.concurrent.LinkedBlockingQueue<Payload>()
+            val sent = java.util.concurrent.LinkedBlockingQueue<String>()
+            c.onHostPayload = { got.put(it) }
+            c.onStrokeSent = { sent.put(it) }
+            c.start()
+            awaitState(c) { it is ClientState.Ready }
+            host.push(Payload.DocRemove(listOf("x")))
+            host.push(Payload.CanvasViewport(app.inkbridge.core.canvas.Viewport(1.0, 2.0, 0.5)))
+            assertEquals(Payload.DocRemove(listOf("x")), got.poll(3, TimeUnit.SECONDS))
+            assertIs<Payload.CanvasViewport>(got.poll(3, TimeUnit.SECONDS))
+            assertEquals(app.inkbridge.core.canvas.Viewport(1.0, 2.0, 0.5), c.viewport, "host view adopted")
+            c.submit(StylusEvent.Begin("s9", Tool.PEN, InkPoint(0.0, 0.0, 1.0, 0)))
+            c.submit(StylusEvent.End("s9"))
+            assertEquals("s9", sent.poll(3, TimeUnit.SECONDS))
             runBlocking { c.stop() }
         }
     }

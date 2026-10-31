@@ -41,9 +41,11 @@ public enum ProtocolError: Error, Equatable, CustomStringConvertible {
 public enum MessageCodec {
     public static let maxStringLength = 128
     public static let maxPointsPerMessage = 256
-    /// Coordinates slightly outside 0...1 are tolerated (and clamped by the
-    /// drawing engine) because digitizers report edge samples past the panel.
-    public static let coordinateRange: ClosedRange<Double> = -0.1...1.1
+    public static let maxIDsPerMessage = 256
+    /// Canvas coordinates are unbounded in principle; this cap keeps a hostile
+    /// peer from producing values that overflow rendering math.
+    public static let coordinateRange: ClosedRange<Double> = -1e7...1e7
+    public static let widthRange: ClosedRange<Double> = 0.01...10_000
 
     // MARK: Encoding
 
@@ -82,8 +84,20 @@ public enum MessageCodec {
             return ["reason": reason]
         case let .deviceSurface(w, h):
             return ["surface_width_px": w, "surface_height_px": h]
-        case let .strokeBegin(id, tool, point):
-            return ["stroke_id": id, "tool": tool.rawValue, "point": encode(point)]
+        case let .strokeBegin(id, tool, point, style):
+            var f: [String: Any] = ["stroke_id": id, "tool": tool.rawValue, "point": encode(point)]
+            if let style { f["style"] = encode(style) }
+            return f
+        case let .strokeStyle(id, tool, style):
+            return ["stroke_id": id, "tool": tool.rawValue, "style": encode(style)]
+        case let .canvasViewport(v):
+            return ["x": v.x, "y": v.y, "zoom": v.zoom]
+        case let .canvasCommand(c):
+            return ["command": c.rawValue]
+        case .docReset:
+            return [:]
+        case let .docRemove(ids):
+            return ["stroke_ids": ids]
         case let .strokePoint(id, points):
             return ["stroke_id": id, "points": points.map(encode)]
         case let .strokeEnd(id), let .strokeCancel(id):
@@ -101,6 +115,10 @@ public enum MessageCodec {
 
     private static func encode(_ p: InkPoint) -> [String: Any] {
         ["x": p.x, "y": p.y, "p": p.p, "t": p.t]
+    }
+
+    private static func encode(_ s: WireStyle) -> [String: Any] {
+        ["color": s.color.hex, "width": s.width]
     }
 
     // MARK: Decoding
@@ -134,9 +152,31 @@ public enum MessageCodec {
         case "device.surface":
             return .deviceSurface(widthPx: try f.dimension("surface_width_px"), heightPx: try f.dimension("surface_height_px"))
         case "stroke.begin":
-            let tool = try f.string("tool")
-            guard let t = Tool(rawValue: tool) else { throw ProtocolError.invalidField("tool") }
-            return .strokeBegin(strokeID: try f.string("stroke_id"), tool: t, point: try decodePoint(f.object("point"), field: "point"))
+            let style = try f.optionalObject("style").map { try decodeStyle($0) }
+            return .strokeBegin(strokeID: try f.string("stroke_id"), tool: try f.tool("tool"),
+                                point: try decodePoint(f.object("point"), field: "point"), style: style)
+        case "stroke.style":
+            return .strokeStyle(strokeID: try f.string("stroke_id"), tool: try f.tool("tool"), style: try decodeStyle(f.object("style")))
+        case "canvas.viewport":
+            guard let x = f.double("x"), let y = f.double("y"), let zoom = f.double("zoom"),
+                  coordinateRange.contains(x), coordinateRange.contains(y), Viewport.zoomRange.contains(zoom)
+            else { throw ProtocolError.invalidField("viewport") }
+            return .canvasViewport(Viewport(x: x, y: y, zoom: zoom))
+        case "canvas.command":
+            guard let c = CanvasCommand(rawValue: try f.string("command")) else { throw ProtocolError.invalidField("command") }
+            return .canvasCommand(c)
+        case "doc.reset":
+            return .docReset
+        case "doc.remove":
+            let list = try f.array("stroke_ids")
+            guard !list.isEmpty, list.count <= maxIDsPerMessage else { throw ProtocolError.invalidField("stroke_ids") }
+            let ids = try list.map { item -> String in
+                guard let s = item as? String, !s.isEmpty, s.utf8.count <= maxStringLength else {
+                    throw ProtocolError.invalidField("stroke_ids")
+                }
+                return s
+            }
+            return .docRemove(strokeIDs: ids)
         case "stroke.point":
             let list = try f.array("points")
             guard !list.isEmpty, list.count <= maxPointsPerMessage else { throw ProtocolError.invalidField("points") }
@@ -182,6 +222,14 @@ public enum MessageCodec {
             ),
             auth: try f.optionalHex("auth")
         )
+    }
+
+    private static func decodeStyle(_ obj: [String: Any]) throws -> WireStyle {
+        let f = Fields(obj)
+        guard let color = RGBA(hex: try f.string("color")), let width = f.double("width"), widthRange.contains(width) else {
+            throw ProtocolError.invalidField("style")
+        }
+        return WireStyle(color: color, width: width)
     }
 
     private static func decodePoint(_ obj: [String: Any], field: String) throws -> InkPoint {
@@ -265,6 +313,16 @@ private struct Fields {
     func object(_ key: String) throws -> [String: Any] {
         guard let o = try value(key) as? [String: Any] else { throw ProtocolError.invalidField(key) }
         return o
+    }
+
+    func optionalObject(_ key: String) throws -> [String: Any]? {
+        guard obj[key] != nil, !(obj[key] is NSNull) else { return nil }
+        return try object(key)
+    }
+
+    func tool(_ key: String) throws -> Tool {
+        guard let t = Tool(rawValue: try string(key)) else { throw ProtocolError.invalidField(key) }
+        return t
     }
 
     func array(_ key: String) throws -> [Any] {

@@ -1,1 +1,1 @@
-{"version":1,"type":"error","sequence":3,"timestamp_ns":3000,"code":"auth_failed","message":"pairing code mismatch"}
+{"version":2,"type":"error","sequence":3,"timestamp_ns":3000,"code":"auth_failed","message":"pairing code mismatch"}

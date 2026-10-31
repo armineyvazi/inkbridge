@@ -1,6 +1,5 @@
 package app.inkbridge.core
 
-import app.inkbridge.core.input.CoordinateNormalizer
 import app.inkbridge.core.input.PointerAction
 import app.inkbridge.core.input.RawSample
 import app.inkbridge.core.input.StrokeProcessor
@@ -20,7 +19,7 @@ import kotlin.test.assertTrue
 class BenchmarkTest {
     @Test
     fun processAndEncodePerEvent() {
-        val p = StrokeProcessor(CoordinateNormalizer(1404, 1872), "bench")
+        val p = StrokeProcessor(streamTag = "bench")
         p.process(PointerAction.DOWN, ToolKind.STYLUS, false, listOf(RawSample(1f, 1f, 0.5f, 0)))
         val samples = List(2) { RawSample(700f + it, 900f, 0.6f, it.toLong()) }
         repeat(20_000) { // warm-up for the JIT

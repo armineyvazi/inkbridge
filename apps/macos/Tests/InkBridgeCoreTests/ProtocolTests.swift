@@ -4,11 +4,11 @@ import XCTest
 final class MessageCodecTests: XCTestCase {
     func testEveryValidFixtureDecodesAndRoundTrips() throws {
         let files = try Fixtures.files("valid")
-        XCTAssertEqual(files.count, 16)
+        XCTAssertEqual(files.count, 22)
         for url in files {
             let data = try Data(contentsOf: url)
             let message = try MessageCodec.decode(data)
-            XCTAssertEqual(message.payload.type + ".json", url.lastPathComponent)
+            XCTAssertTrue(url.lastPathComponent.hasPrefix(message.payload.type + "."), url.lastPathComponent)
             let reencoded = try MessageCodec.decode(MessageCodec.encode(message))
             XCTAssertEqual(reencoded, message, url.lastPathComponent)
         }
@@ -24,6 +24,9 @@ final class MessageCodecTests: XCTestCase {
         XCTAssertThrowsError(try MessageCodec.decode(Fixtures.data("invalid/unsupported-version.json"))) {
             XCTAssertEqual($0 as? ProtocolError, .unsupportedVersion(99))
         }
+        XCTAssertThrowsError(try MessageCodec.decode(Fixtures.data("invalid/v1-message.json"))) {
+            XCTAssertEqual($0 as? ProtocolError, .unsupportedVersion(1), "v1 peers are refused, not misread")
+        }
         XCTAssertThrowsError(try MessageCodec.decode(Fixtures.data("invalid/missing-stroke-id.json"))) {
             XCTAssertEqual($0 as? ProtocolError, .missingField("stroke_id"))
         }
@@ -33,7 +36,7 @@ final class MessageCodecTests: XCTestCase {
     }
 
     func testUnknownTypeIsRecoverable() {
-        let data = Data(#"{"version":1,"type":"future.thing","sequence":1,"timestamp_ns":1}"#.utf8)
+        let data = Data(#"{"version":2,"type":"future.thing","sequence":1,"timestamp_ns":1}"#.utf8)
         XCTAssertThrowsError(try MessageCodec.decode(data)) { error in
             XCTAssertEqual(error as? ProtocolError, .unknownType("future.thing"))
             XCTAssertTrue((error as? ProtocolError)?.isRecoverable == true)
@@ -41,8 +44,30 @@ final class MessageCodecTests: XCTestCase {
     }
 
     func testBooleanFieldRejectsNumber() {
-        let data = Data(#"{"version":1,"type":"auth.challenge","sequence":1,"timestamp_ns":1,"nonce":"00","required":1}"#.utf8)
+        let data = Data(#"{"version":2,"type":"auth.challenge","sequence":1,"timestamp_ns":1,"nonce":"00","required":1}"#.utf8)
         XCTAssertThrowsError(try MessageCodec.decode(data))
+    }
+
+    func testV2Messages() throws {
+        let host = try MessageCodec.decode(Fixtures.data("valid/stroke.begin.host.json"))
+        guard case let .strokeBegin(_, tool, point, style) = host.payload else { return XCTFail() }
+        XCTAssertEqual(tool, .highlighter)
+        XCTAssertEqual(point.x, -1250.5, "canvas coordinates may be negative")
+        XCTAssertEqual(style?.width, 22)
+        XCTAssertEqual(style?.color.hex, "#ffdb1a59")
+        let vp = try MessageCodec.decode(Fixtures.data("valid/canvas.viewport.json"))
+        XCTAssertEqual(vp.payload, .canvasViewport(Viewport(x: -2808, y: -936.5, zoom: 0.25)))
+        XCTAssertEqual(try MessageCodec.decode(Fixtures.data("valid/doc.remove.json")).payload, .docRemove(strokeIDs: ["s-9f1c-1", "s-9f1c-2"]))
+        XCTAssertEqual(try MessageCodec.decode(Fixtures.data("valid/canvas.command.json")).payload, .canvasCommand(.undo))
+    }
+
+    func testColorHexRoundTrip() {
+        for c in [RGBA.red, .blue, .black, RGBA(1, 0.86, 0.1, 0.35)] {
+            let back = RGBA(hex: c.hex)!
+            XCTAssertEqual(back.r, c.r, accuracy: 1.0 / 255)
+            XCTAssertEqual(back.a, c.a, accuracy: 1.0 / 255)
+        }
+        XCTAssertNil(RGBA(hex: "red"))
     }
 
     func testStrokePointDecodesBatch() throws {

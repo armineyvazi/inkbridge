@@ -26,7 +26,10 @@ class ProtocolException(message: String, val recoverable: Boolean = false) : Exc
 object MessageCodec {
     const val MAX_STRING_LENGTH = 128
     const val MAX_POINTS_PER_MESSAGE = 256
-    private val COORDINATE_RANGE = -0.1..1.1
+    const val MAX_IDS_PER_MESSAGE = 256
+    /** Canvas px are unbounded in principle; the cap keeps rendering math finite. */
+    private val COORDINATE_RANGE = -1e7..1e7
+    private val WIDTH_RANGE = 0.01..10_000.0
 
     private val sessionTypes = setOf("session.start", "session.pause", "session.resume", "session.save")
 
@@ -50,11 +53,25 @@ object MessageCodec {
             "surface_width_px" to JsonPrimitive(p.widthPx),
             "surface_height_px" to JsonPrimitive(p.heightPx),
         )
-        is Payload.StrokeBegin -> mapOf(
+        is Payload.StrokeBegin -> buildMap {
+            put("stroke_id", JsonPrimitive(p.strokeId))
+            put("tool", JsonPrimitive(p.tool.wire))
+            put("point", point(p.point))
+            p.style?.let { put("style", style(it)) }
+        }
+        is Payload.StrokeStyle -> mapOf(
             "stroke_id" to JsonPrimitive(p.strokeId),
             "tool" to JsonPrimitive(p.tool.wire),
-            "point" to point(p.point),
+            "style" to style(p.style),
         )
+        is Payload.CanvasViewport -> mapOf(
+            "x" to JsonPrimitive(p.viewport.x),
+            "y" to JsonPrimitive(p.viewport.y),
+            "zoom" to JsonPrimitive(p.viewport.zoom),
+        )
+        is Payload.Command -> mapOf("command" to JsonPrimitive(p.command.wire))
+        is Payload.DocReset -> emptyMap()
+        is Payload.DocRemove -> mapOf("stroke_ids" to buildJsonArray { p.strokeIds.forEach { add(JsonPrimitive(it)) } })
         is Payload.StrokePoints -> mapOf(
             "stroke_id" to JsonPrimitive(p.strokeId),
             "points" to buildJsonArray { p.points.forEach { add(point(it)) } },
@@ -82,6 +99,11 @@ object MessageCodec {
             put("stylus_button", h.capabilities.stylusButton)
         })
         h.auth?.let { put("auth", JsonPrimitive(it)) }
+    }
+
+    private fun style(s: WireStyle) = buildJsonObject {
+        put("color", Colors.toHex(s.argb))
+        put("width", s.width)
     }
 
     private fun point(p: InkPoint) = buildJsonObject {
@@ -114,9 +136,33 @@ object MessageCodec {
         "device.surface" -> Payload.Surface(f.dimension("surface_width_px"), f.dimension("surface_height_px"))
         "stroke.begin" -> Payload.StrokeBegin(
             f.string("stroke_id"),
-            Tool.fromWire(f.string("tool")) ?: throw ProtocolException("invalid field tool"),
+            f.tool("tool"),
             point(f.obj("point"), "point"),
+            f.optionalObj("style")?.let(::style),
         )
+        "stroke.style" -> Payload.StrokeStyle(f.string("stroke_id"), f.tool("tool"), style(f.obj("style")))
+        "canvas.viewport" -> {
+            val x = f.double("x"); val y = f.double("y"); val z = f.double("zoom")
+            if (x == null || y == null || z == null || x !in COORDINATE_RANGE || y !in COORDINATE_RANGE ||
+                z !in app.inkbridge.core.canvas.Viewport.ZOOM_RANGE
+            ) throw ProtocolException("invalid field viewport")
+            Payload.CanvasViewport(app.inkbridge.core.canvas.Viewport(x, y, z))
+        }
+        "canvas.command" -> Payload.Command(
+            CanvasCommand.fromWire(f.string("command")) ?: throw ProtocolException("invalid field command"),
+        )
+        "doc.reset" -> Payload.DocReset
+        "doc.remove" -> {
+            val list = f.array("stroke_ids")
+            if (list.isEmpty() || list.size > MAX_IDS_PER_MESSAGE) throw ProtocolException("invalid field stroke_ids")
+            Payload.DocRemove(list.map {
+                val prim = it as? JsonPrimitive
+                if (prim == null || !prim.isString || prim.content.isEmpty() || prim.content.length > MAX_STRING_LENGTH) {
+                    throw ProtocolException("invalid field stroke_ids")
+                }
+                prim.content
+            })
+        }
         "stroke.point" -> {
             val list = f.array("points")
             if (list.isEmpty() || list.size > MAX_POINTS_PER_MESSAGE) throw ProtocolException("invalid field points")
@@ -146,6 +192,14 @@ object MessageCodec {
             capabilities = Capabilities(caps.bool("pressure"), caps.bool("tilt"), caps.bool("eraser"), caps.bool("stylus_button")),
             auth = f.optionalHex("auth"),
         )
+    }
+
+    private fun style(o: JsonObject): WireStyle {
+        val f = Fields(o)
+        val argb = Colors.fromHex(f.string("color")) ?: throw ProtocolException("invalid field style")
+        val w = f.double("width")
+        if (w == null || w !in WIDTH_RANGE) throw ProtocolException("invalid field style")
+        return WireStyle(argb, w)
     }
 
     private fun point(o: JsonObject, field: String): InkPoint {
@@ -220,6 +274,11 @@ private class Fields(val obj: JsonObject) {
         val v = obj[key] ?: throw ProtocolException("missing field $key")
         return v as? JsonObject ?: throw ProtocolException("invalid field $key")
     }
+
+    fun optionalObj(key: String): JsonObject? =
+        if (obj[key] == null || obj[key] is JsonNull) null else obj(key)
+
+    fun tool(key: String): Tool = Tool.fromWire(string(key)) ?: throw ProtocolException("invalid field $key")
 
     fun array(key: String): JsonArray {
         val v = obj[key] ?: throw ProtocolException("missing field $key")

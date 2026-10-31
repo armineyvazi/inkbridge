@@ -1,7 +1,7 @@
 package app.inkbridge.core.protocol
 
 /** The protocol version this build speaks. */
-const val PROTOCOL_VERSION = 1
+const val PROTOCOL_VERSION = 2
 
 /** The tool a stroke is drawn with. The device sends only [PEN] or [ERASER]. */
 enum class Tool(val wire: String) {
@@ -16,11 +16,23 @@ enum class Tool(val wire: String) {
 }
 
 /**
- * One stylus sample in normalized surface coordinates: [x], [y] in 0..1 with
- * the origin at the top-left, [p] pressure in 0..1, [t] sample time in ns on
- * the device's monotonic clock.
+ * One stylus sample in **canvas coordinates** (canvas px: 1 unit = 1 tablet
+ * pixel at zoom 1, unbounded, y down; ADR-006). [p] is pressure 0..1, [t]
+ * the sample time in ns on the device's monotonic clock.
  */
 data class InkPoint(val x: Double, val y: Double, val p: Double, val t: Long)
+
+/** Stroke look on the wire: ARGB color and width in canvas px. */
+data class WireStyle(val argb: Int, val width: Double)
+
+/** Document commands the tablet can ask the Mac to perform. */
+enum class CanvasCommand(val wire: String) {
+    UNDO("undo"), REDO("redo"), CLEAR("clear");
+
+    companion object {
+        fun fromWire(s: String): CanvasCommand? = entries.firstOrNull { it.wire == s }
+    }
+}
 
 data class Capabilities(
     val pressure: Boolean,
@@ -62,8 +74,27 @@ sealed interface Payload {
     data class Surface(val widthPx: Int, val heightPx: Int) : Payload {
         override val type get() = "device.surface"
     }
-    data class StrokeBegin(val strokeId: String, val tool: Tool, val point: InkPoint) : Payload {
+    /** [style] is set on host→device strokes; the device omits it. */
+    data class StrokeBegin(val strokeId: String, val tool: Tool, val point: InkPoint, val style: WireStyle? = null) : Payload {
         override val type get() = "stroke.begin"
+    }
+    /** Host → device: how the host resolved a device stroke. */
+    data class StrokeStyle(val strokeId: String, val tool: Tool, val style: WireStyle) : Payload {
+        override val type get() = "stroke.style"
+    }
+    /** Either direction: the view of the canvas moved. */
+    data class CanvasViewport(val viewport: app.inkbridge.core.canvas.Viewport) : Payload {
+        override val type get() = "canvas.viewport"
+    }
+    data class Command(val command: CanvasCommand) : Payload {
+        override val type get() = "canvas.command"
+    }
+    /** Host → device: drop every confirmed stroke before a full resync. */
+    data object DocReset : Payload {
+        override val type get() = "doc.reset"
+    }
+    data class DocRemove(val strokeIds: List<String>) : Payload {
+        override val type get() = "doc.remove"
     }
     data class StrokePoints(val strokeId: String, val points: List<InkPoint>) : Payload {
         override val type get() = "stroke.point"

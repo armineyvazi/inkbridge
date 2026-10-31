@@ -1,1 +1,1 @@
-{"version":1,"type":"device.disconnect","sequence":9,"timestamp_ns":9000,"reason":"user"}
+{"version":2,"type":"device.disconnect","sequence":9,"timestamp_ns":9000,"reason":"user"}

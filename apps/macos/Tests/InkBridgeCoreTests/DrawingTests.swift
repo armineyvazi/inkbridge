@@ -1,4 +1,5 @@
 import CoreGraphics
+import ImageIO
 import XCTest
 @testable import InkBridgeCore
 
@@ -9,41 +10,79 @@ private func pt(_ x: Double, _ y: Double, p: Double = 0.5, t: Int64 = 0) -> InkP
 }
 
 final class CoordinateMapperTests: XCTestCase {
-    func testStretchMapsCornersToCanvasCorners() {
-        let m = CoordinateMapper(canvas: CGSize(width: 1440, height: 900), surface: CGSize(width: 1404, height: 1872), fit: .stretch)
+    let display = CGSize(width: 1600, height: 1000)
+    let tablet = CGSize(width: 1404, height: 1872)  // portrait, px
+
+    func testHomeViewportStretchMapsTabletCornersToDisplayCorners() {
+        let m = CoordinateMapper(canvas: CGSize(width: 1440, height: 900), surface: tablet, fit: .stretch)
         XCTAssertEqual(m.map(x: 0, y: 0), CGPoint(x: 0, y: 0))
-        XCTAssertEqual(m.map(x: 1, y: 1), CGPoint(x: 1440, y: 900))
-        XCTAssertEqual(m.map(x: 0.5, y: 0.25), CGPoint(x: 720, y: 225))
+        XCTAssertEqual(m.map(x: 1404, y: 1872), CGPoint(x: 1440, y: 900))
+        XCTAssertEqual(m.map(x: 702, y: 468).x, 720, accuracy: 1e-9)
     }
 
     func testAspectFitLetterboxesPortraitTabletOnLandscapeDisplay() {
-        // 3:4 portrait tablet on a 16:10 display: full height, centered horizontally.
-        let m = CoordinateMapper(canvas: CGSize(width: 1600, height: 1000), surface: CGSize(width: 1404, height: 1872))
+        let m = CoordinateMapper(canvas: display, surface: tablet)
         let r = m.activeRect
         XCTAssertEqual(r.height, 1000, accuracy: 0.001)
         XCTAssertEqual(r.width, 750, accuracy: 0.001)
         XCTAssertEqual(r.minX, 425, accuracy: 0.001)
         XCTAssertEqual(m.map(x: 0, y: 0).x, 425, accuracy: 0.001)
-        XCTAssertEqual(m.map(x: 1, y: 1).x, 1175, accuracy: 0.001)
-        XCTAssertEqual(m.aspectRatio, 0.75, accuracy: 0.0001)
+        XCTAssertEqual(m.map(x: 1404, y: 1872).x, 1175, accuracy: 0.001)
+        XCTAssertEqual(m.scale, 1000.0 / 1872.0, accuracy: 1e-9, "display points per canvas px")
     }
 
-    func testLandscapeTabletOnLandscapeDisplay() {
-        let m = CoordinateMapper(canvas: CGSize(width: 1600, height: 1000), surface: CGSize(width: 1872, height: 1404))
-        XCTAssertEqual(m.activeRect.width, 1333.333, accuracy: 0.01)
-        XCTAssertEqual(m.activeRect.height, 1000, accuracy: 0.001)
+    func testZoomingOutShowsMoreCanvasWithoutChangingStrokeData() {
+        var m = CoordinateMapper(canvas: display, surface: tablet)
+        let p = InkPoint(x: 702, y: 936, p: 1, t: 0)  // tablet centre at home view
+        let before = m.map(p)
+        m.viewport = Viewport(x: -702, y: -936, zoom: 0.5)  // zoomed out around the same centre
+        XCTAssertEqual(m.map(p).x, before.x, accuracy: 1e-9, "centre stays put")
+        XCTAssertEqual(m.map(p).y, before.y, accuracy: 1e-9)
+        XCTAssertEqual(m.visibleCanvasRect.width, 2808, accuracy: 1e-9)
+        XCTAssertEqual(m.scale, 0.5 * 1000.0 / 1872.0, accuracy: 1e-9, "ink thins as you zoom out")
     }
 
-    func testOutOfRangeIsClamped() {
-        let m = CoordinateMapper(canvas: CGSize(width: 100, height: 100), surface: CGSize(width: 1, height: 1))
-        XCTAssertEqual(m.map(x: -0.05, y: 1.08), CGPoint(x: 0, y: 100))
+    func testPanningMovesTheViewNotTheInk() {
+        var m = CoordinateMapper(canvas: display, surface: tablet)
+        m.viewport = Viewport(x: 5000, y: 0, zoom: 1)
+        XCTAssertEqual(m.map(x: 5000, y: 0).x, 425, accuracy: 1e-9, "canvas x=5000 is now the left edge")
+        XCTAssertLessThan(m.map(x: 0, y: 0).x, 0, "old content is off-screen, not clamped or lost")
+    }
+
+    func testUnmapInvertsMap() {
+        var m = CoordinateMapper(canvas: display, surface: tablet, calibration: .init(offsetX: 0.01, scaleX: 1.02))
+        m.viewport = Viewport(x: -300, y: 250, zoom: 1.7)
+        let q = m.unmap(m.map(x: 123.4, y: -56.7))
+        XCTAssertEqual(q.x, 123.4, accuracy: 1e-6)
+        XCTAssertEqual(q.y, -56.7, accuracy: 1e-6)
     }
 
     func testCalibrationOffsetAndScale() {
         let cal = CoordinateMapper.Calibration(offsetX: 0.1, offsetY: 0, scaleX: 1.25, scaleY: 1)
-        let m = CoordinateMapper(canvas: CGSize(width: 100, height: 100), surface: CGSize(width: 1, height: 1), calibration: cal)
-        XCTAssertEqual(m.map(x: 0.1, y: 0).x, 0, accuracy: 1e-9)
-        XCTAssertEqual(m.map(x: 0.9, y: 0).x, 100, accuracy: 1e-9)
+        let m = CoordinateMapper(canvas: CGSize(width: 100, height: 100), surface: CGSize(width: 100, height: 100), calibration: cal)
+        XCTAssertEqual(m.map(x: 10, y: 0).x, 0, accuracy: 1e-9)
+        XCTAssertEqual(m.map(x: 90, y: 0).x, 100, accuracy: 1e-9)
+    }
+}
+
+final class ViewportTests: XCTestCase {
+    func testFittingCentresContentWithMargin() {
+        let v = Viewport.fitting(CGRect(x: 1000, y: 2000, width: 2808, height: 100), in: CGSize(width: 1404, height: 1872))
+        XCTAssertEqual(v.zoom, 1404 * 0.9 / 2808, accuracy: 1e-9, "width-limited")
+        XCTAssertEqual(v.x + 1404 / v.zoom / 2, 1000 + 1404, accuracy: 1e-6, "horizontally centred")
+    }
+
+    func testZoomKeepsFocusPointFixed() {
+        let v = Viewport(x: 100, y: 200, zoom: 1)
+        let z = v.zoomed(by: 2, focus: CGPoint(x: 300, y: 400))
+        XCTAssertEqual(z.zoom, 2)
+        XCTAssertEqual(z.x + 300 / z.zoom, 100 + 300, accuracy: 1e-9)
+        XCTAssertEqual(z.y + 400 / z.zoom, 200 + 400, accuracy: 1e-9)
+    }
+
+    func testZoomIsClamped() {
+        XCTAssertEqual(Viewport.home.zoomed(by: 1e-9, focus: .zero).zoom, Viewport.zoomRange.lowerBound)
+        XCTAssertEqual(Viewport.home.zoomed(by: 1e9, focus: .zero).zoom, Viewport.zoomRange.upperBound)
     }
 }
 
@@ -84,6 +123,14 @@ final class SmoothingTests: XCTestCase {
 }
 
 final class StrokeStoreTests: XCTestCase {
+    // These tests use small coordinates, so scale style and eraser to match.
+    private let pen = StrokeStyle(color: .black, width: 0.003, pressureSensitive: true)
+    private func makeStore() -> StrokeStore {
+        let s = StrokeStore()
+        s.eraserRadius = 0.015
+        return s
+    }
+
     private func draw(_ store: StrokeStore, _ id: String, tool: Tool = .pen, _ points: [InkPoint]) {
         store.begin(id: id, tool: tool, style: pen, point: points[0])
         if points.count > 1 { store.append(id: id, points: Array(points.dropFirst())) }
@@ -91,7 +138,7 @@ final class StrokeStoreTests: XCTestCase {
     }
 
     func testStrokeLifecycleCommitsOnEnd() {
-        let s = StrokeStore()
+        let s = makeStore()
         s.begin(id: "a", tool: .pen, style: pen, point: pt(0.1, 0.1))
         s.append(id: "a", points: [pt(0.2, 0.2), pt(0.3, 0.3)])
         XCTAssertEqual(s.active["a"]?.points.count, 3)
@@ -102,14 +149,14 @@ final class StrokeStoreTests: XCTestCase {
     }
 
     func testPointsForUnknownStrokeAreIgnored() {
-        let s = StrokeStore()
+        let s = makeStore()
         XCTAssertNil(s.append(id: "ghost", points: [pt(0, 0)]))
         s.end(id: "ghost")
         XCTAssertTrue(s.strokes.isEmpty)
     }
 
     func testCancelDiscardsStroke() {
-        let s = StrokeStore()
+        let s = makeStore()
         s.begin(id: "a", tool: .pen, style: pen, point: pt(0.1, 0.1))
         s.cancel(id: "a")
         XCTAssertTrue(s.strokes.isEmpty)
@@ -117,7 +164,7 @@ final class StrokeStoreTests: XCTestCase {
     }
 
     func testUndoRedoWholeStrokes() {
-        let s = StrokeStore()
+        let s = makeStore()
         draw(s, "a", [pt(0.1, 0.1), pt(0.2, 0.2)])
         draw(s, "b", [pt(0.5, 0.5), pt(0.6, 0.6)])
         s.undo()
@@ -131,7 +178,7 @@ final class StrokeStoreTests: XCTestCase {
     }
 
     func testNewStrokeClearsRedo() {
-        let s = StrokeStore()
+        let s = makeStore()
         draw(s, "a", [pt(0.1, 0.1)])
         s.undo()
         draw(s, "b", [pt(0.2, 0.2)])
@@ -140,7 +187,7 @@ final class StrokeStoreTests: XCTestCase {
     }
 
     func testClearIsUndoable() {
-        let s = StrokeStore()
+        let s = makeStore()
         draw(s, "a", [pt(0.1, 0.1)])
         draw(s, "b", [pt(0.2, 0.2)])
         s.clear()
@@ -154,7 +201,7 @@ final class StrokeStoreTests: XCTestCase {
     }
 
     func testEraserRemovesOnlyTouchedStrokesAndUndoRestoresOrder() {
-        let s = StrokeStore()
+        let s = makeStore()
         draw(s, "top", [pt(0.1, 0.1), pt(0.9, 0.1)])
         draw(s, "mid", [pt(0.1, 0.5), pt(0.9, 0.5)])
         draw(s, "bot", [pt(0.1, 0.9), pt(0.9, 0.9)])
@@ -172,7 +219,7 @@ final class StrokeStoreTests: XCTestCase {
     }
 
     func testCancelledEraserGestureRestoresStrokes() {
-        let s = StrokeStore()
+        let s = makeStore()
         draw(s, "a", [pt(0.1, 0.5), pt(0.9, 0.5)])
         s.begin(id: "e", tool: .eraser, style: pen, point: pt(0.5, 0.5))
         XCTAssertTrue(s.strokes.isEmpty)
@@ -180,19 +227,30 @@ final class StrokeStoreTests: XCTestCase {
         XCTAssertEqual(s.strokes.map(\.id), ["a"])
     }
 
-    func testEraserRespectsAspectRatio() {
-        let s = StrokeStore()
-        s.aspectRatio = 2  // canvas twice as wide as tall
+    func testEraserRadiusIsIsotropicInCanvasUnits() {
+        let s = makeStore()
         s.eraserRadius = 0.02
         draw(s, "v", [pt(0.5, 0.1), pt(0.5, 0.9)])
-        // 0.015 normalized-x away is 0.03 in height units: outside the radius.
-        s.begin(id: "e", tool: .eraser, style: pen, point: pt(0.515, 0.5))
+        s.begin(id: "e", tool: .eraser, style: pen, point: pt(0.53, 0.5))  // 0.03 away: outside
         s.end(id: "e")
         XCTAssertEqual(s.strokes.count, 1)
+        s.begin(id: "e2", tool: .eraser, style: pen, point: pt(0.515, 0.5))  // 0.015 away: inside
+        s.end(id: "e2")
+        XCTAssertTrue(s.strokes.isEmpty)
+    }
+
+    func testContentBoundsCoverInkIncludingWidth() {
+        let s = StrokeStore()
+        XCTAssertNil(s.contentBounds)
+        let wide = StrokeStyle(color: .black, width: 10, pressureSensitive: false)
+        s.begin(id: "a", tool: .pen, style: wide, point: pt(-500, 100))
+        s.append(id: "a", points: [pt(2000, 300)])
+        s.end(id: "a")
+        XCTAssertEqual(s.contentBounds, CGRect(x: -505, y: 95, width: 2510, height: 210))
     }
 
     func testLaserStrokesFadeAndAreNotUndoable() {
-        let s = StrokeStore()
+        let s = makeStore()
         s.begin(id: "l", tool: .laser, style: pen, point: pt(0.5, 0.5))
         s.end(id: "l", now: 100)
         XCTAssertTrue(s.strokes.isEmpty)
@@ -203,7 +261,7 @@ final class StrokeStoreTests: XCTestCase {
     }
 
     func testRevisionChangesOnlyWithCommittedInk() {
-        let s = StrokeStore()
+        let s = makeStore()
         let r0 = s.revision
         s.begin(id: "a", tool: .pen, style: pen, point: pt(0.1, 0.1))
         s.append(id: "a", points: [pt(0.2, 0.2)])
@@ -287,34 +345,118 @@ final class SessionTests: XCTestCase {
         XCTAssertEqual(a.add(new), new.id)
     }
 
-    func testArchiveRoundTripAndExports() throws {
-        let dir = FileManager.default.temporaryDirectory.appendingPathComponent("inkbridge-test-\(UUID().uuidString)")
-        defer { try? FileManager.default.removeItem(at: dir) }
+    private func sampleSession() -> ([Stroke], SessionMetadata) {
         let strokes = [
-            Stroke(id: "a", tool: .pen, style: pen, points: [pt(0.1, 0.1, p: 0.2), pt(0.5, 0.4, p: 0.9), pt(0.9, 0.2)]),
-            Stroke(id: "b", tool: .highlighter, style: StrokeStyle(color: RGBA(1, 0.9, 0, 0.35), width: 18, pressureSensitive: false), points: [pt(0.2, 0.8), pt(0.8, 0.8)]),
+            Stroke(id: "a", tool: .pen, style: pen, points: [pt(140, 187, p: 0.2), pt(702, 750, p: 0.9), pt(1260, 374)]),
+            Stroke(id: "b", tool: .highlighter, style: StrokeStyle(color: RGBA(1, 0.9, 0, 0.35), width: 30, pressureSensitive: false),
+                   points: [pt(280, 1500), pt(1120, 1500)]),
+            // Far outside the current view: must survive in strokes.json, not in the page images.
+            Stroke(id: "far", tool: .pen, style: pen, points: [pt(90_000, 90_000), pt(90_100, 90_000)]),
         ]
         let mapper = CoordinateMapper(canvas: CGSize(width: 800, height: 500), surface: CGSize(width: 1404, height: 1872))
         let meta = SessionMetadata(id: "s1", title: "Test", startedAt: Date(timeIntervalSince1970: 0), savedAt: Date(timeIntervalSince1970: 60),
-                                   deviceName: "BOOX", displayName: "Built-in", mapper: mapper, strokeCount: 2)
-        try SessionArchive.save(strokes, metadata: meta, to: dir)
+                                   deviceName: "BOOX", displayName: "Built-in", mapper: mapper, strokeCount: strokes.count)
+        return (strokes, meta)
+    }
 
+    private func tempDir() -> URL {
+        FileManager.default.temporaryDirectory.appendingPathComponent("inkbridge-test-\(UUID().uuidString)")
+    }
+
+    func testAutosaveRoundTrip() throws {
+        let dir = tempDir()
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let (strokes, meta) = sampleSession()
+        try SessionArchive.writeStrokes(strokes, metadata: meta, to: dir)
         let (loadedMeta, loaded) = try SessionArchive.load(from: dir)
         XCTAssertEqual(loaded, strokes)
         XCTAssertEqual(loadedMeta, meta)
-        XCTAssertEqual(loadedMeta.mapper, mapper)
+        XCTAssertEqual(loadedMeta.mapper, meta.mapper)
+    }
 
-        let png = try Data(contentsOf: dir.appendingPathComponent("preview.png"))
-        XCTAssertEqual(Array(png.prefix(8)), [0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A])
-        let pdf = try Data(contentsOf: dir.appendingPathComponent("export.pdf"))
-        XCTAssertEqual(String(decoding: pdf.prefix(5), as: UTF8.self), "%PDF-")
-        XCTAssertNotNil(CGPDFDocument(dir.appendingPathComponent("export.pdf") as CFURL)?.page(at: 1))
+    func testOldFormatSessionsAreRejectedNotMisread() throws {
+        let dir = tempDir()
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let (strokes, original) = sampleSession()
+        var meta = original
+        meta.format = 1
+        try SessionArchive.writeStrokes(strokes, metadata: meta, to: dir)
+        XCTAssertThrowsError(try SessionArchive.load(from: dir))
+    }
+
+    func testExportWithBackgroundWritesEveryLayerSeparately() throws {
+        let parent = tempDir()
+        defer { try? FileManager.default.removeItem(at: parent) }
+        try FileManager.default.createDirectory(at: parent, withIntermediateDirectories: true)
+        let dest = parent.appendingPathComponent("Design Session")
+        let (strokes, meta) = sampleSession()
+        let background = try SessionArchive.renderImage([], mapper: meta.mapper, background: nil, scale: 1)  // white page
+        let result = try SessionArchive.export(strokes, metadata: meta, background: background, backgroundUnavailableReason: nil,
+                                               options: ExportOptions(fullPageFormat: .jpeg, pixelScale: 1), to: dest)
+        XCTAssertTrue(result.skipped.isEmpty)
+        for f in ["full-page.jpg", "preview.png", "annotations/annotations.png", "annotations/annotations.svg",
+                  "annotations/strokes.json", "background/screen.png", "session/metadata.json",
+                  "session/coordinate-mapping.json", "manifest.json"] {
+            XCTAssertTrue(FileManager.default.fileExists(atPath: dest.appendingPathComponent(f).path), f)
+        }
+        // Vector data is complete, including ink outside the visible page.
+        let saved = try JSONDecoder().decode([Stroke].self, from: Data(contentsOf: dest.appendingPathComponent("annotations/strokes.json")))
+        XCTAssertEqual(saved.map(\.id), ["a", "b", "far"])
+        // The annotation layer is genuinely transparent where there is no ink.
+        let ink = try XCTUnwrap(CGImageSourceCreateWithURL(dest.appendingPathComponent("annotations/annotations.png") as CFURL, nil)
+            .flatMap { CGImageSourceCreateImageAtIndex($0, 0, nil) })
+        XCTAssertEqual(alpha(ink, x: 5, y: 5), 0)
+        // SVG has the visible strokes and not the far one.
+        let svg = try String(contentsOf: dest.appendingPathComponent("annotations/annotations.svg"), encoding: .utf8)
+        XCTAssertTrue(svg.contains("id=\"a\"") && svg.contains("id=\"b\""))
+        XCTAssertFalse(svg.contains("id=\"far\""))
+        XCTAssertTrue(svg.hasPrefix("<?xml"))
+        XCTAssertEqual(Array(try Data(contentsOf: dest.appendingPathComponent("full-page.jpg")).prefix(2)), [0xFF, 0xD8])
+        // No staging folders left behind.
+        XCTAssertEqual(try FileManager.default.contentsOfDirectory(atPath: parent.path), ["Design Session"])
+    }
+
+    func testExportWithoutScreenPermissionStillSavesInkAndExplains() throws {
+        let parent = tempDir()
+        defer { try? FileManager.default.removeItem(at: parent) }
+        try FileManager.default.createDirectory(at: parent, withIntermediateDirectories: true)
+        let dest = parent.appendingPathComponent("No Background")
+        let (strokes, meta) = sampleSession()
+        let result = try SessionArchive.export(strokes, metadata: meta, background: nil,
+                                               backgroundUnavailableReason: "Screen Recording permission not granted",
+                                               options: ExportOptions(pixelScale: 1), to: dest)
+        XCTAssertEqual(result.skipped["full-page.png"], "Screen Recording permission not granted")
+        XCTAssertFalse(FileManager.default.fileExists(atPath: dest.appendingPathComponent("full-page.png").path))
+        XCTAssertTrue(FileManager.default.fileExists(atPath: dest.appendingPathComponent("annotations/annotations.png").path))
+        XCTAssertTrue(FileManager.default.fileExists(atPath: dest.appendingPathComponent("annotations/strokes.json").path))
+        let manifest = try JSONSerialization.jsonObject(with: Data(contentsOf: dest.appendingPathComponent("manifest.json"))) as? [String: Any]
+        XCTAssertNotNil((manifest?["skipped"] as? [String: String])?["full-page.png"])
+    }
+
+    func testExportReplacesExistingFolderWholesale() throws {
+        let parent = tempDir()
+        defer { try? FileManager.default.removeItem(at: parent) }
+        let dest = parent.appendingPathComponent("Session")
+        try FileManager.default.createDirectory(at: dest, withIntermediateDirectories: true)
+        try Data("old".utf8).write(to: dest.appendingPathComponent("stale.txt"))
+        let (strokes, meta) = sampleSession()
+        try SessionArchive.export(strokes, metadata: meta, background: nil, backgroundUnavailableReason: nil,
+                                  options: ExportOptions(pixelScale: 1), to: dest)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: dest.appendingPathComponent("stale.txt").path))
+        XCTAssertTrue(FileManager.default.fileExists(atPath: dest.appendingPathComponent("manifest.json").path))
+    }
+
+    private func alpha(_ image: CGImage, x: Int, y: Int) -> UInt8 {
+        let ctx = CGContext(data: nil, width: 1, height: 1, bitsPerComponent: 8, bytesPerRow: 4,
+                            space: CGColorSpace(name: CGColorSpace.sRGB)!, bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue)!
+        ctx.draw(image, in: CGRect(x: -x, y: -(image.height - 1 - y), width: image.width, height: image.height))
+        return ctx.data!.load(fromByteOffset: 3, as: UInt8.self)
     }
 
     func testRenderedImageContainsInk() throws {
-        let mapper = CoordinateMapper(canvas: CGSize(width: 100, height: 100), surface: CGSize(width: 1, height: 1))
+        let mapper = CoordinateMapper(canvas: CGSize(width: 100, height: 100), surface: CGSize(width: 100, height: 100))
         let stroke = Stroke(id: "a", tool: .pen, style: StrokeStyle(color: RGBA(1, 0, 0), width: 6, pressureSensitive: false),
-                            points: [pt(0.1, 0.5), pt(0.9, 0.5)])
+                            points: [pt(10, 50), pt(90, 50)])
         let image = try SessionArchive.renderImage([stroke], mapper: mapper, background: nil, scale: 1)
         let data = image.dataProvider!.data! as Data
         let bpr = image.bytesPerRow
@@ -335,6 +477,8 @@ final class GeometryTests: XCTestCase {
 
     func testFastSwipeBetweenSamplesStillErases() {
         let s = StrokeStore()
+        s.eraserRadius = 0.015
+        let pen = StrokeStyle(color: .black, width: 0.003, pressureSensitive: true)
         s.begin(id: "line", tool: .pen, style: pen, point: pt(0.1, 0.5))
         s.append(id: "line", points: [pt(0.9, 0.5)])
         s.end(id: "line")

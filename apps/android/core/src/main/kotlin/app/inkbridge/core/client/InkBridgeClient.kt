@@ -1,6 +1,8 @@
 package app.inkbridge.core.client
 
+import app.inkbridge.core.canvas.Viewport
 import app.inkbridge.core.input.StylusEvent
+import app.inkbridge.core.protocol.CanvasCommand
 import app.inkbridge.core.protocol.Capabilities
 import app.inkbridge.core.protocol.DeviceHello
 import app.inkbridge.core.protocol.Message
@@ -83,6 +85,19 @@ class InkBridgeClient(
     /** Events dropped because the outbound queue was full. */
     val droppedEvents = AtomicLong(0)
 
+    /**
+     * Host → device document and view messages (stroke.*, stroke.style,
+     * doc.*, canvas.viewport). Called on a network thread.
+     */
+    @Volatile var onHostPayload: ((Payload) -> Unit)? = null
+
+    /** A local stroke's end (or cancel) reached the socket. Called on a network thread. */
+    @Volatile var onStrokeSent: ((String) -> Unit)? = null
+
+    /** The tablet's current view; re-sent after every (re)connect so the Mac follows. */
+    @Volatile var viewport: Viewport = Viewport.HOME
+        private set
+
     private val outbox = Channel<Payload>(queueCapacity)
     private val sendLock = Mutex()
     private var sequence = 0L
@@ -112,6 +127,19 @@ class InkBridgeClient(
             is StylusEvent.Cancel -> Payload.StrokeCancel(event.strokeId)
         }
         if (outbox.trySend(payload).isFailure) droppedEvents.incrementAndGet()
+    }
+
+    /** Tells the Mac the view moved. Coalescing is up to the caller (send on gesture end / throttled). */
+    fun submitViewport(v: Viewport) {
+        viewport = v
+        if (_state.value is ClientState.Ready && outbox.trySend(Payload.CanvasViewport(v)).isFailure) {
+            droppedEvents.incrementAndGet()
+        }
+    }
+
+    /** Asks the Mac to undo / redo / clear. The result comes back as document messages. */
+    fun submitCommand(c: CanvasCommand) {
+        if (outbox.trySend(Payload.Command(c)).isFailure) droppedEvents.incrementAndGet()
     }
 
     /**
@@ -170,6 +198,8 @@ class InkBridgeClient(
             }
         }
         val ready = handshake(transport, inbox)
+        // The Mac follows the tablet's view; tell it where we are before any strokes.
+        send(transport, Payload.CanvasViewport(viewport))
         _state.value = ClientState.Ready(transport.kind, ready.hostName, ready.sessionId)
         onReady()
 
@@ -240,6 +270,12 @@ class InkBridgeClient(
             is Payload.Error -> if (p.code == "bad_frame" || p.code == "too_many_errors") {
                 throw ProtocolException("host error: ${p.code}")
             }
+            is Payload.CanvasViewport -> {
+                viewport = p.viewport
+                onHostPayload?.invoke(p)
+            }
+            is Payload.StrokeBegin, is Payload.StrokePoints, is Payload.StrokeEnd, is Payload.StrokeStyle,
+            is Payload.DocReset, is Payload.DocRemove -> onHostPayload?.invoke(p)
             else -> Unit
         }
     }
@@ -253,6 +289,11 @@ class InkBridgeClient(
     private suspend fun send(transport: Transport, payload: Payload, timestampNs: Long = clock()) {
         sendLock.withLock {
             transport.send(MessageCodec.encode(Message(++sequence, timestampNs, payload)))
+        }
+        when (payload) {
+            is Payload.StrokeEnd -> onStrokeSent?.invoke(payload.strokeId)
+            is Payload.StrokeCancel -> onStrokeSent?.invoke(payload.strokeId)
+            else -> Unit
         }
     }
 }

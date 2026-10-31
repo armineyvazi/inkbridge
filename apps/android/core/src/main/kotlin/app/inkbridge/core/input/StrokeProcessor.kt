@@ -1,18 +1,22 @@
 package app.inkbridge.core.input
 
+import app.inkbridge.core.canvas.Viewport
 import app.inkbridge.core.protocol.InkPoint
+import kotlin.math.roundToLong
 import app.inkbridge.core.protocol.Tool
 
 /**
  * Turns raw pointer events into stroke lifecycle events.
  *
- * Responsibilities: palm/finger rejection, stroke IDs, normalization, and
+ * Responsibilities: palm/finger rejection, stroke IDs, view px → canvas px
+ * through the current [viewport] (ADR-006), and
  * repairing broken sequences (a DOWN without a preceding UP ends the old
  * stroke first; MOVE without DOWN is ignored). Kept free of Android types
  * so it is unit-testable on the JVM.
  */
 class StrokeProcessor(
-    val normalizer: CoordinateNormalizer,
+    /** Read on every sample; written by the UI thread when the user pans or zooms. */
+    @Volatile var viewport: Viewport = Viewport.HOME,
     /** Prefix that makes stroke IDs unique across app processes. */
     private val streamTag: String,
     var acceptFinger: Boolean = false,
@@ -71,14 +75,21 @@ class StrokeProcessor(
         ToolKind.MOUSE, ToolKind.UNKNOWN -> true
     }
 
-    private fun point(s: RawSample) = InkPoint(
-        x = normalizer.normalizeX(s.x),
-        y = normalizer.normalizeY(s.y),
-        p = CoordinateNormalizer.round4(s.pressure.toDouble().coerceIn(0.0, 1.0)),
-        t = s.timeNs,
-    )
+    private fun point(s: RawSample): InkPoint {
+        val v = viewport
+        return InkPoint(
+            x = round2(v.toCanvasX(s.x)),
+            y = round2(v.toCanvasY(s.y)),
+            p = round4(s.pressure.toDouble().coerceIn(0.0, 1.0)),
+            t = s.timeNs,
+        )
+    }
 
     companion object {
         const val MAX_BATCH = 256
+
+        // 0.01 canvas px is far below what a digitizer resolves; rounding keeps messages short.
+        fun round2(v: Double): Double = (v * 100).roundToLong() / 100.0
+        fun round4(v: Double): Double = (v * 10_000).roundToLong() / 10_000.0
     }
 }

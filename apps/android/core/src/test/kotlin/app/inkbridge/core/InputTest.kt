@@ -1,6 +1,6 @@
 package app.inkbridge.core
 
-import app.inkbridge.core.input.CoordinateNormalizer
+import app.inkbridge.core.canvas.Viewport
 import app.inkbridge.core.input.EventRateMeter
 import app.inkbridge.core.input.PointerAction
 import app.inkbridge.core.input.RawSample
@@ -18,33 +18,8 @@ import kotlin.test.assertTrue
 
 private fun s(x: Float, y: Float, p: Float = 0.5f, t: Long = 0) = RawSample(x, y, p, t)
 
-class CoordinateNormalizerTest {
-    @Test
-    fun normalizesAndClamps() {
-        val n = CoordinateNormalizer(1404, 1872)
-        assertEquals(0.0, n.normalizeX(0f))
-        assertEquals(1.0, n.normalizeX(1404f))
-        assertEquals(0.5, n.normalizeY(936f))
-        assertEquals(1.0, n.normalizeX(1500f), "past the right edge clamps")
-        assertEquals(0.0, n.normalizeY(-3f))
-    }
-
-    @Test
-    fun roundsToFiveDecimals() {
-        assertEquals(0.33333, CoordinateNormalizer(3, 3).normalizeX(1f))
-    }
-
-    @Test
-    fun resizeOnRotation() {
-        val n = CoordinateNormalizer(1404, 1872)
-        n.resize(1872, 1404)
-        assertEquals(0.5, n.normalizeX(936f))
-        assertFailsWith<IllegalArgumentException> { n.resize(0, 10) }
-    }
-}
-
 class StrokeProcessorTest {
-    private fun processor() = StrokeProcessor(CoordinateNormalizer(1000, 1000), "abcd")
+    private fun processor() = StrokeProcessor(streamTag = "abcd")
 
     @Test
     fun fullLifecycle() {
@@ -53,7 +28,7 @@ class StrokeProcessorTest {
         val b = assertIs<StylusEvent.Begin>(begin.single())
         assertEquals("s-abcd-1", b.strokeId)
         assertEquals(Tool.PEN, b.tool)
-        assertEquals(0.1, b.point.x)
+        assertEquals(100.0, b.point.x, "home view: canvas px = view px")
         assertEquals(0.3, b.point.p)
         assertEquals(10, b.point.t)
 
@@ -65,6 +40,15 @@ class StrokeProcessorTest {
         assertIs<StylusEvent.Move>(up[0])
         assertIs<StylusEvent.End>(up[1])
         assertTrue(!p.isStrokeActive)
+    }
+
+    @Test
+    fun samplesAreConvertedThroughTheCurrentViewport() {
+        val p = processor()
+        p.viewport = Viewport(x = 5000.0, y = -200.0, zoom = 0.5)
+        val b = p.process(PointerAction.DOWN, ToolKind.STYLUS, false, listOf(s(100f, 40f)))[0] as StylusEvent.Begin
+        assertEquals(5200.0, b.point.x, "x + px / zoom")
+        assertEquals(-120.0, b.point.y)
     }
 
     @Test

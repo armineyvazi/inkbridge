@@ -14,6 +14,8 @@ public final class StrokeIngestor {
         /// Committed ink changed (stroke ended, erased, cancelled).
         case documentChanged
         case surfaceChanged(CGSize)
+        /// The device moved its view.
+        case viewportChanged(Viewport)
     }
 
     /// Resolves the device's physical tool into the tool and style to draw with.
@@ -24,6 +26,8 @@ public final class StrokeIngestor {
 
     public let store: StrokeStore
     public private(set) var surface: CGSize
+    /// The active device's current view of the canvas.
+    public var viewport: Viewport = .home
     /// Messages dropped as duplicates or out of order, for diagnostics.
     public private(set) var droppedCount = 0
 
@@ -47,7 +51,18 @@ public final class StrokeIngestor {
             return setSurface(CGSize(width: hello.surfaceWidthPx, height: hello.surfaceHeightPx))
         case let .deviceSurface(w, h):
             return setSurface(CGSize(width: w, height: h))
-        case let .strokeBegin(id, deviceTool, point):
+        case let .canvasViewport(v):
+            guard v != viewport else { return .none }
+            viewport = v
+            return .viewportChanged(v)
+        case let .canvasCommand(command):
+            switch command {
+            case .undo: store.undo()
+            case .redo: store.redo()
+            case .clear: store.clear()
+            }
+            return .documentChanged
+        case let .strokeBegin(id, deviceTool, point, _):
             let (tool, style) = resolveTool(deviceTool)
             store.begin(id: id, tool: tool, style: style, point: point)
             return tool == .eraser ? .documentChanged : .strokeUpdated(id: id, added: 1)

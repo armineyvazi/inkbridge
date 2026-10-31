@@ -17,13 +17,24 @@ public struct RGBA: Equatable, Hashable, Codable, Sendable {
     public static let green = RGBA(0.16, 0.68, 0.33)
     public static let yellow = RGBA(1.0, 0.86, 0.10)
     public static let white = RGBA(1, 1, 1)
+
+    /// `#rrggbbaa`, the protocol's color encoding.
+    public var hex: String {
+        func byte(_ v: Double) -> String { String(format: "%02x", Int((min(max(v, 0), 1) * 255).rounded())) }
+        return "#" + byte(r) + byte(g) + byte(b) + byte(a)
+    }
+
+    public init?(hex: String) {
+        guard hex.count == 9, hex.first == "#", let v = UInt32(hex.dropFirst(), radix: 16) else { return nil }
+        self.init(Double(v >> 24 & 0xff) / 255, Double(v >> 16 & 0xff) / 255, Double(v >> 8 & 0xff) / 255, Double(v & 0xff) / 255)
+    }
 }
 
 /// How a stroke looks. Captured when the stroke begins so later toolbar
 /// changes do not restyle strokes that are already on screen.
 public struct StrokeStyle: Equatable, Codable, Sendable {
     public var color: RGBA
-    /// Nominal line width in points at full pressure.
+    /// Nominal line width in **canvas px** at full pressure (scales with zoom).
     public var width: Double
     /// Whether width follows pressure. Off for highlighter and for devices
     /// that do not report pressure.

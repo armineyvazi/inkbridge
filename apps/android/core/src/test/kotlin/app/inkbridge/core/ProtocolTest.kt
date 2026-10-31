@@ -29,10 +29,10 @@ class MessageCodecTest {
     @Test
     fun everyValidFixtureDecodesAndRoundTrips() {
         val files = Fixtures.files("valid")
-        assertEquals(16, files.size)
+        assertEquals(22, files.size)
         for (f in files) {
             val m = MessageCodec.decode(f.readBytes())
-            assertEquals(f.name, m.payload.type + ".json")
+            assertTrue(f.name.startsWith(m.payload.type + "."), f.name)
             assertEquals(m, MessageCodec.decode(MessageCodec.encode(m)), f.name)
         }
     }
@@ -47,7 +47,7 @@ class MessageCodecTest {
     @Test
     fun unknownTypeIsRecoverable() {
         val e = assertFailsWith<ProtocolException> {
-            MessageCodec.decode("""{"version":1,"type":"future.thing","sequence":1,"timestamp_ns":1}""".encodeToByteArray())
+            MessageCodec.decode("""{"version":2,"type":"future.thing","sequence":1,"timestamp_ns":1}""".encodeToByteArray())
         }
         assertTrue(e.recoverable)
     }
@@ -55,8 +55,30 @@ class MessageCodecTest {
     @Test
     fun booleanFieldRejectsNumber() {
         assertFailsWith<ProtocolException> {
-            MessageCodec.decode("""{"version":1,"type":"auth.challenge","sequence":1,"timestamp_ns":1,"nonce":"00","required":1}""".encodeToByteArray())
+            MessageCodec.decode("""{"version":2,"type":"auth.challenge","sequence":1,"timestamp_ns":1,"nonce":"00","required":1}""".encodeToByteArray())
         }
+    }
+
+    @Test
+    fun v2Messages() {
+        val host = MessageCodec.decode(Fixtures.bytes("valid/stroke.begin.host.json")).payload as Payload.StrokeBegin
+        assertEquals(-1250.5, host.point.x)
+        assertEquals("#ffdb1a59", app.inkbridge.core.protocol.Colors.toHex(host.style!!.argb))
+        assertEquals(22.0, host.style!!.width)
+        val vp = MessageCodec.decode(Fixtures.bytes("valid/canvas.viewport.json")).payload as Payload.CanvasViewport
+        assertEquals(app.inkbridge.core.canvas.Viewport(-2808.0, -936.5, 0.25), vp.viewport)
+        assertEquals(Payload.DocRemove(listOf("s-9f1c-1", "s-9f1c-2")), MessageCodec.decode(Fixtures.bytes("valid/doc.remove.json")).payload)
+        assertEquals(Payload.DocReset, MessageCodec.decode(Fixtures.bytes("valid/doc.reset.json")).payload)
+        assertFailsWith<ProtocolException>("v1 refused") { MessageCodec.decode(Fixtures.bytes("invalid/v1-message.json")) }
+    }
+
+    @Test
+    fun colorHexMatchesSwift() {
+        // Swift RGBA(0.92, 0.23, 0.20, 1).hex == "#eb3b33ff"
+        val argb = app.inkbridge.core.protocol.Colors.fromHex("#eb3b33ff")!!
+        assertEquals(0xFFEB3B33.toInt(), argb)
+        assertEquals("#eb3b33ff", app.inkbridge.core.protocol.Colors.toHex(argb))
+        assertEquals(null, app.inkbridge.core.protocol.Colors.fromHex("red"))
     }
 
     @Test

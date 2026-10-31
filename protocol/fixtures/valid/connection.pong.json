@@ -1,1 +1,1 @@
-{"version":1,"type":"connection.pong","sequence":11,"timestamp_ns":10500,"ping_id":42,"echo_timestamp_ns":10000}
+{"version":2,"type":"connection.pong","sequence":11,"timestamp_ns":10500,"ping_id":42,"echo_timestamp_ns":10000}

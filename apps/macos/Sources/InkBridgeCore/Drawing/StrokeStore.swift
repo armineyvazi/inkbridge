@@ -1,3 +1,4 @@
+import CoreGraphics
 import Foundation
 
 /// The drawing document: committed strokes, strokes in progress, and an
@@ -29,14 +30,25 @@ public final class StrokeStore {
     /// Bumped whenever `strokes` changes, so renderers can cache committed ink.
     public private(set) var revision = 0
 
-    /// Eraser radius as a fraction of the canvas height.
-    public var eraserRadius = 0.015
-    /// Canvas width / height, used to measure eraser distance isotropically.
-    public var aspectRatio = 1.0
+    /// Eraser radius in canvas px. The coordinator converts the toolbar's
+    /// on-screen size using the current zoom.
+    public var eraserRadius = 20.0
     /// How long a laser stroke stays visible after pen-up.
     public static let laserLifetime: TimeInterval = 1.2
 
     public init() {}
+
+    /// Bounding box of all committed ink in canvas px, or nil when empty.
+    public var contentBounds: CGRect? {
+        var r: CGRect?
+        for s in strokes where !s.points.isEmpty {
+            let b = s.bounds
+            let pad = s.style.width / 2
+            let sr = CGRect(x: b.minX - pad, y: b.minY - pad, width: b.maxX - b.minX + 2 * pad, height: b.maxY - b.minY + 2 * pad)
+            r = r.map { $0.union(sr) } ?? sr
+        }
+        return r
+    }
 
     public var canUndo: Bool { !undoStack.isEmpty }
     public var canRedo: Bool { !redoStack.isEmpty }
@@ -188,10 +200,9 @@ public final class StrokeStore {
 
     /// Whether the eraser segment a→b passes within the eraser radius of `stroke`.
     func hits(_ stroke: Stroke, _ a: InkPoint, _ b: InkPoint) -> Bool {
-        let r = eraserRadius + stroke.style.width * 0.0005
-        let rx = r / aspectRatio
+        let r = eraserRadius + stroke.style.width / 2
         let bb = stroke.bounds
-        guard max(a.x, b.x) >= bb.minX - rx, min(a.x, b.x) <= bb.maxX + rx,
+        guard max(a.x, b.x) >= bb.minX - r, min(a.x, b.x) <= bb.maxX + r,
               max(a.y, b.y) >= bb.minY - r, min(a.y, b.y) <= bb.maxY + r else { return false }
         let e0 = scaled(a), e1 = scaled(b)
         let pts = stroke.points.map(scaled)
@@ -202,8 +213,7 @@ public final class StrokeStore {
         return false
     }
 
-    /// Normalized point with x scaled so distances are isotropic on the canvas.
-    private func scaled(_ p: InkPoint) -> SIMD2<Double> { SIMD2(p.x * aspectRatio, p.y) }
+    private func scaled(_ p: InkPoint) -> SIMD2<Double> { SIMD2(p.x, p.y) }
 }
 
 /// 2-D distance helpers for hit testing.
