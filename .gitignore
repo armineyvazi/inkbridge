@@ -1,0 +1,12 @@
+# Build output is redirected to ~/Library/Caches/InkBridge, but keep stray dirs out.
+.build/
+build/
+.gradle/
+.kotlin/
+local.properties
+*.apk
+*.xcodeproj/xcuserdata/
+.swiftpm/
+.DS_Store
+.idea/
+*.iml

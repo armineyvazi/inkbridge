@@ -1,0 +1,6 @@
+{
+  "pairing_code": "K7QW-M3XP",
+  "normalized_key": "K7QWM3XP",
+  "nonce_hex": "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f",
+  "expected_response_hex": "ffeb7f29884dec7b6c86d90e51c1d83b0ee11b041c6f814665ae78212c886834"
+}
