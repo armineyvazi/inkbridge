@@ -21,12 +21,24 @@ iCloud folder, `codesign` fails on synced extended attributes.
 cd apps/macos
 make test        # unit + integration tests (62)
 make app         # → ~/Library/Caches/InkBridge/macos-build/InkBridge.app
-make run         # build and open
+make install     # copy to /Applications (Spotlight, Launchpad, privacy settings)
+make run         # install and open
 ```
 
 InkBridge runs in the menu bar (pen icon). The toolbar appears at the bottom of the
 selected display. The first Wi-Fi use triggers the macOS **Local Network** prompt:
 allow it.
+
+### macOS permissions
+
+| Permission | Needed for | Where |
+|------------|-----------|-------|
+| Local Network | Wi-Fi mode (Bonjour + LAN listener) | prompted automatically; System Settings → Privacy & Security → Local Network |
+| Screen & System Audio Recording | **only** "Include a screenshot when saving" | System Settings → Privacy & Security → Screen & System Audio Recording → **+** → `/Applications/InkBridge.app` |
+| Accessibility | not needed (hot keys use Carbon) | — |
+
+The app is ad-hoc signed, so macOS may treat each rebuild as a new app and forget a
+granted permission. Re-toggle it after `make install` if screenshots stop working.
 
 ## Android app
 
