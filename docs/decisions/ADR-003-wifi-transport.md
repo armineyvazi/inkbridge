@@ -20,7 +20,7 @@ Research is in [`research/wifi-research.md`](../research/wifi-research.md).
 - Authentication: the host sends a nonce, and the device answers
   `HMAC-SHA256(normalized pairing code, nonce)`. The pairing code is generated on
   the Mac, shown in its menu and settings, and can be regenerated. Five failures in
-  60 s lock out the LAN listener.
+  60 s from one IP lock that IP out (escalating); a global brake limits multi-host guessing.
 - **TLS is deferred to Phase 5**, using a self-signed Mac identity pinned by
   fingerprint, delivered through a QR code. See
   [`architecture/security.md`](../architecture/security.md) for why PSK-TLS is not
@@ -28,6 +28,8 @@ Research is in [`research/wifi-research.md`](../research/wifi-research.md).
 
 ## Consequences
 
+- Nobody can draw without the code, but a captured handshake allows **offline**
+  brute force of the ~40-bit code; TLS/PAKE in Phase 5 closes this.
 - Nobody can draw without the code. A passive observer on the same network *can* read
   strokes, and an active one could inject into an authenticated session. This is
   stated in the security doc and the README.

@@ -40,7 +40,7 @@ endpoints. They differ only in address and `kind`.
 | Listener | Bind | Auth | Discovery |
 |----------|------|------|-----------|
 | USB | `127.0.0.1:8765` (`requiredLocalEndpoint`) | none: only processes on this Mac can reach it, and `adb reverse` delivers the tablet there | — |
-| Wi-Fi | `*:8766` | HMAC challenge, lockout after 5 failures in 60 s | Bonjour `_inkbridge._tcp` |
+| Wi-Fi | `*:8766` | HMAC challenge; per-IP lockout after 5 failures in 60 s (30 s, doubling to 15 min); handshake timeouts count as failures | Bonjour `_inkbridge._tcp` |
 
 Each accepted `NWConnection` becomes a `PeerConnection`. It handles framing, decoding,
 the handshake state machine (`connecting → awaitingHello → ready → closed`), the

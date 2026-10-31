@@ -20,6 +20,7 @@ final class PeerConnection {
 
     let id = UUID()
     let kind: TransportKind
+    let remoteHost: String
     private unowned let server: InkServer
     private let connection: NWConnection
     private var state: State = .connecting
@@ -32,10 +33,16 @@ final class PeerConnection {
     private var timers: [DispatchSourceTimer] = []
     private var badMessages = 0
 
-    init(server: InkServer, connection: NWConnection, kind: TransportKind) {
+    init(server: InkServer, connection: NWConnection, kind: TransportKind, remoteHost: String) {
         self.server = server
         self.connection = connection
         self.kind = kind
+        self.remoteHost = remoteHost
+    }
+
+    var isReady: Bool {
+        if case .ready = state { return true }
+        return false
     }
 
     private var info: PeerInfo? {
@@ -69,7 +76,10 @@ final class PeerConnection {
         // The host always speaks first so the device knows whether to authenticate.
         send(.authChallenge(nonce: [UInt8](nonce).hexString, required: authRequired))
         schedule(after: server.config.handshakeTimeout) { [weak self] in
-            guard let self, case .awaitingHello = self.state else { return }
+            guard let self, case let .awaitingHello(_, authRequired) = self.state else { return }
+            // On the LAN a stalled handshake is an attempt that never proved the
+            // code; count it so idle sockets cannot be opened for free.
+            if authRequired { self.server.recordAuthFailure(host: self.remoteHost) }
             self.reject(code: "handshake_timeout", "no device.hello received")
         }
     }
@@ -79,7 +89,7 @@ final class PeerConnection {
             guard let response = hello.auth,
                   PairingAuth.verify(response: response, code: server.pairingCode, nonce: nonce)
             else {
-                server.recordAuthFailure()
+                server.recordAuthFailure(host: remoteHost)
                 server.log.notice("pairing failed for \(hello.deviceName, privacy: .public)")
                 reject(code: "auth_failed", "pairing code mismatch")
                 return
@@ -87,6 +97,7 @@ final class PeerConnection {
         }
         let info = PeerInfo(id: id, kind: kind, hello: hello, remote: String(describing: connection.endpoint))
         state = .ready(info)
+        if authRequired { server.recordAuthSuccess(host: remoteHost) }
         send(.deviceReady(hostName: server.config.serviceName, sessionID: server.config.sessionID))
         server.log.info("device ready: \(hello.deviceName, privacy: .public) via \(self.kind.rawValue, privacy: .public)")
         server.peerAuthenticated(self, info: info)

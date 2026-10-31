@@ -225,4 +225,17 @@ final class InkServerTests: XCTestCase {
         c.send(.deviceHello(c.hello(auth: nil)))
         XCTAssertTrue(recorder.wait { recorder.disconnected.contains("idle timeout") })
     }
+
+    func testStalledWifiHandshakesCannotStarveUSB() throws {
+        try startServer()
+        // Regression: pending LAN sockets used to count against the shared peer cap.
+        let squatters = (0..<6).map { _ in TestClient(port: recorder.ports[.wifi]!) }
+        defer { squatters.forEach { $0.close() } }
+        Thread.sleep(forTimeInterval: 0.3)
+        let usb = TestClient(port: recorder.ports[.usb]!)
+        defer { usb.close() }
+        _ = try XCTUnwrap(usb.challenge(), "USB must still be accepted")
+        usb.send(.deviceHello(usb.hello(auth: nil)))
+        XCTAssertNotNil(usb.waitFor { if case .deviceReady = $0.payload { return true }; return false })
+    }
 }

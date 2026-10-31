@@ -14,7 +14,7 @@
 ## "pairing code rejected by the Mac"
 
 The code changed (Settings → *New code*) or was mistyped. Codes ignore case and
-spaces. After 5 wrong attempts in a minute, the Mac refuses LAN connections for
+spaces. After 5 wrong attempts in a minute, the Mac refuses LAN connections **from that tablet's IP** for 30 s (doubling on repeats);
 up to 60 s.
 
 ## Wi-Fi: the tablet cannot find the Mac

@@ -12,7 +12,7 @@ sequenceDiagram
       H->>T: device.ready {host_name, session_id}
     else invalid / missing
       H->>T: error {code: auth_failed}
-      H--xT: close · failure counted (5 in 60 s ⇒ LAN lockout)
+      H--xT: close · failure counted for this IP (5 in 60 s ⇒ that IP locked out 30 s, doubling)
       Note over T: ClientState.Failed — no retry loop
     end
   else not required

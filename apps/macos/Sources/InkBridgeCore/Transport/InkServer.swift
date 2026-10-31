@@ -40,7 +40,11 @@ public final class InkServer {
         public var pingInterval: TimeInterval = 2
         /// A peer that sends nothing for this long is presumed gone.
         public var idleTimeout: TimeInterval = 7
+        /// Authenticated devices at once.
         public var maxPeers = 4
+        /// Connections still in the handshake, per transport. Separate caps mean
+        /// idle LAN sockets can never block the USB tablet from connecting.
+        public var maxPendingPerTransport = 4
 
         public init(serviceName: String, pairingCode: String, sessionID: String) {
             self.serviceName = serviceName
@@ -62,7 +66,7 @@ public final class InkServer {
     private(set) var config: Config
     private var listeners: [TransportKind: NWListener] = [:]
     private var peers: [UUID: PeerConnection] = [:]
-    private var authFailures: [Date] = []
+    private var throttle = AuthThrottle()
     let log = Logger(subsystem: "app.inkbridge", category: "server")
 
     public init(config: Config, delegateQueue: DispatchQueue = .main) {
@@ -161,12 +165,16 @@ public final class InkServer {
     }
 
     private func accept(_ connection: NWConnection, kind: TransportKind) {
-        if peers.count >= config.maxPeers || (kind == .wifi && isAuthLockedOut()) {
-            log.notice("rejecting \(String(describing: connection.endpoint), privacy: .public): limit or lockout")
+        let pending = peers.values.filter { $0.kind == kind && !$0.isReady }.count
+        let ready = peers.values.filter(\.isReady).count
+        let host = Self.remoteHost(connection.endpoint)
+        if pending >= config.maxPendingPerTransport || ready >= config.maxPeers
+            || (kind == .wifi && throttle.isLockedOut(host: host)) {
+            log.notice("rejecting \(host, privacy: .public): limit or lockout")
             connection.cancel()
             return
         }
-        let peer = PeerConnection(server: self, connection: connection, kind: kind)
+        let peer = PeerConnection(server: self, connection: connection, kind: kind, remoteHost: host)
         peers[peer.id] = peer
         peer.start(authRequired: kind == .wifi)
     }
@@ -192,16 +200,18 @@ public final class InkServer {
         if let info { notify { $0.inkServer(self, didDisconnect: info, reason: reason) } }
     }
 
-    func recordAuthFailure() {
-        authFailures.append(Date())
+    func recordAuthFailure(host: String) {
+        throttle.recordFailure(host: host)
     }
 
-    /// After repeated wrong codes, refuse LAN connections for a while so the
-    /// ~40-bit pairing code cannot be brute-forced at line rate.
-    private func isAuthLockedOut() -> Bool {
-        let cutoff = Date().addingTimeInterval(-60)
-        authFailures.removeAll { $0 < cutoff }
-        return authFailures.count >= 5
+    func recordAuthSuccess(host: String) {
+        throttle.recordSuccess(host: host)
+    }
+
+    /// The remote IP without the port, used as the throttling key.
+    static func remoteHost(_ endpoint: NWEndpoint) -> String {
+        if case let .hostPort(host, _) = endpoint { return "\(host)" }
+        return String(describing: endpoint)
     }
 
     private func notify(_ body: @escaping (InkServerDelegate) -> Void) {

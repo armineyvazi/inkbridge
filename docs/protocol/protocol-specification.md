@@ -132,7 +132,7 @@ it must authenticate.
 
 | `code` | Sent by | Effect |
 |--------|---------|--------|
-| `auth_failed` | host | Close. The device stops retrying (`ClientState.Failed`). Five failures within 60 s lock out the LAN listener (connections refused) until the window passes. |
+| `auth_failed` | host | Close. The device stops retrying (`ClientState.Failed`). Five failures within 60 s from one IP lock that IP out of the LAN listener for 30 s, doubling per repeat (max 15 min); Wi-Fi handshake timeouts count as failures. |
 | `handshake_required`, `handshake_timeout` | host | Close. |
 | `bad_frame` | host | Close (framing lost). |
 | `invalid_message` | host | The message is dropped and the connection continues. More than 50 invalid messages per connection ⇒ `too_many_errors` and close. |
@@ -145,7 +145,8 @@ it must authenticate.
 | Points per `stroke.point` | 256 (the device splits larger batches) |
 | String fields | 128 bytes (`error.message` 512) |
 | Surface dimension | 1 … 32 768 px |
-| Concurrent peers per host | 4 |
+| Concurrent authenticated peers per host | 4 |
+| Pending handshakes per transport | 4 |
 | Device outbound queue | 4 096 messages, kept across reconnects; overflow is counted, not blocked |
 
 ## 9. Versioning

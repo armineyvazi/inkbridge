@@ -4,7 +4,7 @@
 
 | Suite | Command | Count | Last result (2026-10-31) |
 |-------|---------|-------|--------------------------|
-| Swift unit + integration | `make -C apps/macos test` | 57 | **57 passed** |
+| Swift unit + integration | `make -C apps/macos test` | 62 | **62 passed** |
 | Kotlin `:core` unit + integration | `make -C apps/android test` | 33 | **33 passed** |
 | Android lint | `./gradlew :app:lintDebug` | — | 0 errors, 22 warnings (i18n string literals, dependency-update notices) |
 | Cross-language E2E, USB path | `scripts/e2e.sh` | 6 strokes | **pass**: 720/720 points, 0 dropped |

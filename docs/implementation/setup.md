@@ -19,7 +19,7 @@ iCloud folder, `codesign` fails on synced extended attributes.
 
 ```bash
 cd apps/macos
-make test        # unit + integration tests (57)
+make test        # unit + integration tests (62)
 make app         # → ~/Library/Caches/InkBridge/macos-build/InkBridge.app
 make run         # build and open
 ```

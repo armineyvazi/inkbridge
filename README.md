@@ -68,7 +68,7 @@ docs/             research, architecture, protocol, ADRs, diagrams
 ## Tests
 
 ```bash
-make -C apps/macos test     # 57 Swift tests (unit + socket integration)
+make -C apps/macos test     # 62 Swift tests (unit + socket integration)
 make -C apps/android test   # 33 Kotlin tests (unit + socket integration)
 scripts/e2e.sh && scripts/e2e.sh wifi
 ```
