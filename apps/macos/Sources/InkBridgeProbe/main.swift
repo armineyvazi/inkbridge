@@ -43,6 +43,10 @@ final class Probe: InkServerDelegate {
     var clock = ClockSync()
     var penToHost = LatencyStats(capacity: 100_000)
     var ingest = LatencyStats(capacity: 100_000)
+    /// Sample time → send time, both on the device clock: delay spent on the tablet.
+    var onDevice = LatencyStats(capacity: 100_000)
+    /// Send time → host receive (needs clock offset): delay in transport.
+    var transport = LatencyStats(capacity: 100_000)
     var messages = 0
     var points = 0
     var firstPointAt: Int64?
@@ -59,8 +63,14 @@ final class Probe: InkServerDelegate {
             points += pts.count
             firstPointAt = firstPointAt ?? receivedAtNs
             lastPointAt = receivedAtNs
-            if let last = pts.last, let hostNs = clock.hostTime(forDeviceNs: last.t) {
-                penToHost.add(Double(receivedAtNs - hostNs) / 1e6)
+            if let last = pts.last {
+                onDevice.add(Double(m.timestampNs - last.t) / 1e6)
+                if let hostNs = clock.hostTime(forDeviceNs: last.t) {
+                    penToHost.add(Double(receivedAtNs - hostNs) / 1e6)
+                }
+                if let sentHostNs = clock.hostTime(forDeviceNs: m.timestampNs) {
+                    transport.add(Double(receivedAtNs - sentHostNs) / 1e6)
+                }
             }
         }
         let change = ingestor.handle(m, streamID: peer.hello.streamID)
@@ -87,10 +97,12 @@ final class Probe: InkServerDelegate {
         print("---- probe report ----")
         print("messages: \(messages), points: \(points), strokes: \(store.strokes.count), dropped duplicates: \(ingestor.droppedCount)")
         if let a = firstPointAt, let b = lastPointAt, b > a {
-            print("point rate: \(String(format: "%.0f", Double(points) / (Double(b - a) / 1e9))) samples/s while drawing")
+            print("point rate: \(String(format: "%.0f", Double(points) / (Double(b - a) / 1e9))) samples/s averaged from first to last point (includes pauses)")
         }
         print("rtt ms (last): \(f(clock.lastRTTNs.map { Double($0) / 1e6 }))")
         print("pen→host ms p50/p95/p99: \(f(penToHost.percentile(0.5))) / \(f(penToHost.percentile(0.95))) / \(f(penToHost.percentile(0.99))) (n=\(penToHost.count))")
+        print("  on tablet (sample→send) ms p50/p95/p99: \(f(onDevice.percentile(0.5))) / \(f(onDevice.percentile(0.95))) / \(f(onDevice.percentile(0.99)))")
+        print("  transport (send→host) ms p50/p95/p99: \(f(transport.percentile(0.5))) / \(f(transport.percentile(0.95))) / \(f(transport.percentile(0.99)))")
         print("ingest ms p50/p99: \(f(ingest.percentile(0.5))) / \(f(ingest.percentile(0.99)))")
     }
 }

@@ -9,21 +9,22 @@
 | Environment inspection | ✅ |
 | USB descriptor and AOA capability probe (`tools/aoa-probe`) | ✅ AOA v2 confirmed |
 | BOOX SDK compatibility analysis | ✅ desk research; on-device decision pending stylus tests |
-| Stylus diagnostic app (x, y, pressure, tool, rate, timestamp, buttons, tilt, hover, dispatch lag, input-device dump) | 🟡 |
+| Stylus diagnostic app (x, y, pressure, tool, rate, timestamp, buttons, tilt, hover, dispatch lag, input-device dump) | ✅ |
 | USB and Wi-Fi research | ✅ |
-| Feasibility report | 🟡 hardware rows pending |
+| Feasibility report | ✅ (Wi-Fi-from-tablet rows pending) |
 
-**Exit criteria:** stylus events received ⏳ · pressure verified ⏳ · working
-development connection ⏳ on hardware (✅ with the simulator).
+**Exit criteria (met 2026-10-31 on a Note Air 2 Plus):** stylus events received ✅ ·
+pressure verified ✅ (0–4095, 360 Hz) · working development connection ✅ (USB via
+adb reverse, p50 5 ms). Note Air 3 itself is still untested.
 
 ## Phase 1: end-to-end MVP
 
 | Deliverable | Status |
 |-------------|--------|
 | Shared protocol v1 + cross-language fixtures | ✅ |
-| Android drawing surface + stroke processor | 🟡 |
+| Android drawing surface + stroke processor | ✅ hardware |
 | macOS TCP server (loopback + LAN, Bonjour, pairing) | ✅ |
-| USB via adb reverse | 🟡 (✅ simulator) |
+| USB via adb reverse | ✅ hardware |
 | Wi-Fi TCP | 🟡 (✅ simulator over LAN IP) |
 | Ordered, de-duplicated delivery | ✅ |
 

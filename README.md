@@ -1,6 +1,6 @@
 # InkBridge
 
-Use a **BOOX Note Air 3** as a pen tablet for macOS. Write on the tablet, and your
+Use a **BOOX** e-ink tablet (target: Note Air 3; tested on a Note Air 2 Plus) as a pen tablet for macOS. Write on the tablet, and your
 strokes appear as native vector ink **over whatever is on the Mac's screen**: videos,
 PDFs, browsers, Figma, slides. The overlay is click-through, so the app underneath
 keeps working.
@@ -11,9 +11,9 @@ about 30 KB/s while drawing, keeps ink editable, and runs entirely on your local
 network or USB cable.
 
 > **Status: Phase 0/1 (developer preview).** Protocol, Mac host, overlay, tools,
-> sessions and Android client are implemented and tested end to end with a simulated
-> tablet. Verification on the real Note Air 3 is in progress. See the
-> [feasibility report](docs/research/hardware-feasibility.md). USB currently needs
+> sessions and Android client are implemented. **Verified on a real BOOX Note Air 2 Plus
+> over USB:** 360 Hz pen input with full pressure, tilt and hover; pen-to-Mac latency
+> p50 5 ms / p95 16 ms. See the [feasibility report](docs/research/hardware-feasibility.md). USB currently needs
 > USB debugging (`adb reverse`). A no-developer-mode USB transport (Android Open
 > Accessory) is the next milestone; the device's support for it is confirmed.
 
@@ -68,7 +68,7 @@ docs/             research, architecture, protocol, ADRs, diagrams
 ## Tests
 
 ```bash
-make -C apps/macos test     # 62 Swift tests (unit + socket integration)
+make -C apps/macos test     # 63 Swift tests (unit + socket integration)
 make -C apps/android test   # 33 Kotlin tests (unit + socket integration)
 scripts/e2e.sh && scripts/e2e.sh wifi
 ```
@@ -80,7 +80,8 @@ scripts/e2e.sh && scripts/e2e.sh wifi
   [security](docs/architecture/security.md)).
 - There is no calibration wizard, session history browser or onboarding flow yet.
 - The tablet doesn't show the Mac's screen. That's by design.
-- Hardware behaviour (pressure, report rate, eraser, latency) is still being measured.
+- Wi-Fi from the real tablet, eraser-end pens and the Note Air 3 itself are not yet tested.
+- Ink is not drawn on the tablet by default: e-ink rendering on the UI thread triples latency.
 
 ## Documentation
 

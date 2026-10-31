@@ -19,7 +19,14 @@ object StylusCapabilityProbe {
 
     fun capabilities(): Capabilities {
         val pens = stylusDevices()
-        fun has(axis: Int) = pens.any { d -> d.getMotionRange(axis, InputDevice.SOURCE_STYLUS)?.let { it.max > it.min } == true }
+        // Match ranges whose source *contains* the stylus bits. BOOX reports pen
+        // axes under SOURCE_TOUCHSCREEN | SOURCE_STYLUS (0x5002), so an exact
+        // getMotionRange(axis, SOURCE_STYLUS) lookup finds nothing.
+        fun has(axis: Int) = pens.any { d ->
+            d.motionRanges.any { r ->
+                r.axis == axis && r.source and InputDevice.SOURCE_STYLUS == InputDevice.SOURCE_STYLUS && r.max > r.min
+            }
+        }
         return Capabilities(
             pressure = has(MotionEvent.AXIS_PRESSURE),
             tilt = has(MotionEvent.AXIS_TILT),

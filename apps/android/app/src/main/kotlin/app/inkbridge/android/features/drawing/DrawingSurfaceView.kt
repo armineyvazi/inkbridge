@@ -24,7 +24,7 @@ class DrawingSurfaceView @JvmOverloads constructor(
 ) : View(context, attrs) {
     var source: AndroidMotionEventSource? = null
     val diagnostics = StylusDiagnostics()
-    var showLocalInk = true
+    var showLocalInk = false
     /** Surface size changes (first layout, rotation). */
     var onSurfaceChanged: ((Int, Int) -> Unit)? = null
     /** Throttled diagnostics refresh; e-ink cannot redraw text at input rate. */

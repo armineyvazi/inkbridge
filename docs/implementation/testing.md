@@ -4,7 +4,7 @@
 
 | Suite | Command | Count | Last result (2026-10-31) |
 |-------|---------|-------|--------------------------|
-| Swift unit + integration | `make -C apps/macos test` | 62 | **62 passed** |
+| Swift unit + integration | `make -C apps/macos test` | 63 | **63 passed** |
 | Kotlin `:core` unit + integration | `make -C apps/android test` | 33 | **33 passed** |
 | Android lint | `./gradlew :app:lintDebug` | — | 0 errors, 22 warnings (i18n string literals, dependency-update notices) |
 | Cross-language E2E, USB path | `scripts/e2e.sh` | 6 strokes | **pass**: 720/720 points, 0 dropped |
@@ -46,13 +46,14 @@ Apple Silicon Mac; Swift numbers from the debug test build unless noted.
 
 | Item | Unit | Integration | Hardware |
 |------|------|-------------|----------|
-| Protocol codec + framing | ✅ | ✅ | ⏳ |
-| Pairing auth | ✅ | ✅ | ⏳ |
-| USB via adb reverse | — | ✅ (loopback, simulator) | ⏳ |
+| Protocol codec + framing | ✅ | ✅ | ✅ (Note Air 2 Plus) |
+| Pairing auth | ✅ | ✅ | ⏳ (Wi-Fi from tablet) |
+| USB via adb reverse | — | ✅ (loopback, simulator) | ✅ p50 5 ms / p95 16 ms |
 | Wi-Fi TCP | — | ✅ (Mac LAN IP, simulator) | ⏳ |
 | Bonjour advertise | — | ✅ (`dns-sd -B`) | ⏳ discovery from tablet |
 | AOA support | — | — | ✅ protocol v2 |
-| Stylus capture / pressure / rate / eraser | ✅ (processor logic) | — | ⏳ |
+| Stylus capture / pressure / rate | ✅ (processor logic) | — | ✅ 360 Hz, pressure 0–4095, tilt, hover |
+| Eraser end / stylus buttons | ✅ (processor logic) | — | ⏳ (test pen has none) |
 | Overlay over normal windows, click-through | — | — | ⏳ manual check |
 | Overlay over full-screen apps / Spaces | — | — | ⏳ manual check |
 | Multiple displays / resolution change | ✅ (mapper) | — | ⏳ manual check |

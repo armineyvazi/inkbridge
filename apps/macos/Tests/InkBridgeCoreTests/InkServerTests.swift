@@ -238,4 +238,39 @@ final class InkServerTests: XCTestCase {
         usb.send(.deviceHello(usb.hello(auth: nil)))
         XCTAssertNotNil(usb.waitFor { if case .deviceReady = $0.payload { return true }; return false })
     }
+
+    func testFailedListenerIsRetriedWhenPortFrees() throws {
+        // Hold a loopback port so the USB listener fails at startup.
+        let blocker = NWListener.blockingLoopback()
+        defer { blocker?.listener.cancel() }
+        let port = try XCTUnwrap(blocker?.port)
+        var config = InkServer.Config(serviceName: "Retry", pairingCode: "K7QW-M3XP", sessionID: "s")
+        config.usbPort = port
+        config.wifiEnabled = false
+        let rec = Recorder()
+        let srv = InkServer(config: config, delegateQueue: DispatchQueue(label: "retry.delegate"))
+        srv.restartDelay = 0.2
+        srv.delegate = rec
+        srv.start()
+        defer { srv.stop() }
+        Thread.sleep(forTimeInterval: 0.5)
+        XCTAssertNil(rec.locked { rec.ports[.usb] }, "listener should fail while the port is held")
+        blocker?.listener.cancel()
+        XCTAssertTrue(rec.wait(timeout: 5) { rec.ports[.usb] == port }, "listener must recover once the port frees")
+    }
+}
+
+private extension NWListener {
+    /// A listener bound to an ephemeral loopback port, returned once ready.
+    static func blockingLoopback() -> (listener: NWListener, port: UInt16)? {
+        let params = NWParameters.tcp
+        params.requiredLocalEndpoint = .hostPort(host: .ipv4(.loopback), port: .any)
+        guard let l = try? NWListener(using: params) else { return nil }
+        let ready = DispatchSemaphore(value: 0)
+        l.stateUpdateHandler = { if case .ready = $0 { ready.signal() } }
+        l.newConnectionHandler = { $0.cancel() }
+        l.start(queue: DispatchQueue(label: "blocker"))
+        guard ready.wait(timeout: .now() + 3) == .success, let p = l.port?.rawValue else { return nil }
+        return (l, p)
+    }
 }

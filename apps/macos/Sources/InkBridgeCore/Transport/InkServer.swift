@@ -65,6 +65,12 @@ public final class InkServer {
     let queue = DispatchQueue(label: "inkbridge.server")
     private(set) var config: Config
     private var listeners: [TransportKind: NWListener] = [:]
+    private var running = false
+    private var restartAttempts: [TransportKind: Int] = [:]
+    /// Delay before retrying a listener that failed (e.g. port still held by a
+    /// process that is exiting). Doubles per attempt up to `maxRestartDelay`.
+    var restartDelay: TimeInterval = 1
+    var maxRestartDelay: TimeInterval = 10
     private var peers: [UUID: PeerConnection] = [:]
     private var throttle = AuthThrottle()
     let log = Logger(subsystem: "app.inkbridge", category: "server")
@@ -78,6 +84,7 @@ public final class InkServer {
 
     public func start() {
         queue.async { [self] in
+            running = true
             startListener(.usb)
             if config.wifiEnabled { startListener(.wifi) }
         }
@@ -85,6 +92,7 @@ public final class InkServer {
 
     public func stop() {
         queue.async { [self] in
+            running = false
             listeners.values.forEach { $0.cancel() }
             listeners.removeAll()
             peers.values.forEach { $0.close(reason: "server stopped", notifyPeer: true) }
@@ -144,6 +152,7 @@ public final class InkServer {
             }
         } catch {
             notify { $0.inkServer(self, listener: kind, didChangeState: .failed(error.localizedDescription)) }
+            scheduleRestart(kind)
             return
         }
 
@@ -151,8 +160,14 @@ public final class InkServer {
             guard let self else { return }
             let mapped: ListenerState
             switch state {
-            case .ready: mapped = .listening(port: listener.port?.rawValue ?? port)
-            case .failed(let e): mapped = .failed(e.localizedDescription)
+            case .ready:
+                mapped = .listening(port: listener.port?.rawValue ?? port)
+                self.restartAttempts[kind] = 0
+            case .failed(let e):
+                mapped = .failed(e.localizedDescription)
+                listener.cancel()
+                if self.listeners[kind] === listener { self.listeners[kind] = nil }
+                self.scheduleRestart(kind)
             case .cancelled: mapped = .stopped
             default: mapped = .starting
             }
@@ -162,6 +177,19 @@ public final class InkServer {
         listener.newConnectionHandler = { [weak self] conn in self?.accept(conn, kind: kind) }
         listener.start(queue: queue)
         listeners[kind] = listener
+    }
+
+    /// A failed listener would otherwise leave that transport dead until the
+    /// app restarts; retry with backoff while the server should be running.
+    private func scheduleRestart(_ kind: TransportKind) {
+        let attempt = restartAttempts[kind, default: 0]
+        restartAttempts[kind] = attempt + 1
+        let delay = min(restartDelay * pow(2, Double(attempt)), maxRestartDelay)
+        queue.asyncAfter(deadline: .now() + delay) { [weak self] in
+            guard let self, self.running, self.listeners[kind] == nil else { return }
+            if kind == .wifi && !self.config.wifiEnabled { return }
+            self.startListener(kind)
+        }
     }
 
     private func accept(_ connection: NWConnection, kind: TransportKind) {
