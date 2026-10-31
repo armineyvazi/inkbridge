@@ -1,0 +1,24 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>CFBundleName</key><string>InkBridge</string>
+	<key>CFBundleDisplayName</key><string>InkBridge</string>
+	<key>CFBundleIdentifier</key><string>app.inkbridge.mac</string>
+	<key>CFBundleExecutable</key><string>InkBridge</string>
+	<key>CFBundlePackageType</key><string>APPL</string>
+	<key>CFBundleShortVersionString</key><string>0.1.0</string>
+	<key>CFBundleVersion</key><string>1</string>
+	<key>LSMinimumSystemVersion</key><string>13.0</string>
+	<!-- Menu-bar utility: no Dock icon. -->
+	<key>LSUIElement</key><true/>
+	<key>NSHighResolutionCapable</key><true/>
+	<!-- Wi-Fi mode advertises over Bonjour and accepts LAN connections. -->
+	<key>NSLocalNetworkUsageDescription</key>
+	<string>InkBridge listens on your local network so your BOOX tablet can send pen strokes over Wi-Fi.</string>
+	<key>NSBonjourServices</key>
+	<array><string>_inkbridge._tcp</string></array>
+	<key>NSScreenCaptureUsageDescription</key>
+	<string>Optional: InkBridge can save a screenshot behind your annotations when you save a session.</string>
+</dict>
+</plist>
