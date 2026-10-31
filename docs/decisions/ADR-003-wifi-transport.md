@@ -30,7 +30,7 @@ Research is in [`research/wifi-research.md`](../research/wifi-research.md).
 
 - Nobody can draw without the code, but a captured handshake allows **offline**
   brute force of the ~40-bit code; TLS/PAKE in Phase 5 closes this.
-- Nobody can draw without the code. A passive observer on the same network *can* read
+- A passive observer on the same network *can* read
   strokes, and an active one could inject into an authenticated session. This is
   stated in the security doc and the README.
 - QR pairing arrives together with TLS, because the QR code exists to carry the
