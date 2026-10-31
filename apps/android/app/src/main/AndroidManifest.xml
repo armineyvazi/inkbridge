@@ -1,0 +1,30 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+
+    <!-- TCP to the Mac (both USB via adb reverse and Wi-Fi). -->
+    <uses-permission android:name="android.permission.INTERNET" />
+    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
+    <!-- Bonjour (NSD) discovery of the Mac on Wi-Fi. -->
+    <uses-permission android:name="android.permission.CHANGE_WIFI_MULTICAST_STATE" />
+
+    <application
+        android:allowBackup="false"
+        android:icon="@drawable/ic_inkbridge"
+        android:label="InkBridge"
+        android:supportsRtl="true"
+        android:theme="@style/Theme.InkBridge">
+
+        <!-- configChanges: rotation resizes the surface instead of recreating the
+             activity, so the connection and the stroke in progress survive. -->
+        <activity
+            android:name=".MainActivity"
+            android:configChanges="orientation|screenSize|screenLayout|smallestScreenSize|keyboardHidden"
+            android:exported="true"
+            android:windowSoftInputMode="adjustNothing">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity>
+    </application>
+</manifest>
