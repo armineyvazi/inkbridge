@@ -1,0 +1,26 @@
+%% One pen sample from digitizer to pixels, with where each latency figure is measured.
+sequenceDiagram
+  autonumber
+  participant Pen as Stylus / digitizer
+  participant AV as Android View (UI thread)
+  participant SP as StrokeProcessor
+  participant CL as InkBridgeClient (sender coroutine)
+  participant NET as TCP (adb tunnel or LAN)
+  participant PC as PeerConnection (server queue)
+  participant MAIN as Main thread (ingestor + store)
+  participant OV as OverlayView.draw
+
+  Pen->>AV: MotionEvent (event time t, N historical samples)
+  Note over AV: requestUnbufferedDispatch → no vsync batching
+  AV->>SP: process(action, tool, samples)
+  SP-->>AV: StylusEvent.Move(points[N+1])
+  AV->>CL: submit() → outbox (non-blocking)
+  CL->>NET: frame(stroke.point, seq, timestamp_ns)
+  NET->>PC: bytes (any chunking)
+  PC->>PC: FrameDecoder → MessageCodec.decode (validated)
+  Note over PC: receivedAt = host monotonic now<br/>pen→host = receivedAt − (t − clockOffset)
+  PC->>MAIN: delegate (DispatchQueue.main)
+  MAIN->>MAIN: PeerArbiter.isActive? → StrokeIngestor (seq de-dup) → StrokeStore.append
+  MAIN->>OV: setNeedsDisplay(dirty rect of new segment)
+  OV->>OV: draw cached ink + live stroke
+  Note over OV: receive→draw measured here;<br/>compositor + panel scan-out add ≤ 1 frame

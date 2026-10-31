@@ -1,0 +1,40 @@
+%% InkBridge system architecture (as built, Phase 0/1).
+flowchart TB
+  subgraph Tablet["BOOX Note Air 3 · Android 12 · Kotlin"]
+    direction TB
+    Pen["Wacom EMR stylus<br/>(digitizer)"] --> ME["Android input system<br/>MotionEvent + historical samples"]
+    ME --> AMES["AndroidMotionEventSource<br/>:app input/"]
+    AMES --> SP["StrokeProcessor<br/>palm rejection · stroke IDs · batching"]
+    SP --> CN["CoordinateNormalizer<br/>px → 0..1"]
+    CN --> CL["InkBridgeClient<br/>outbox · sequence · handshake<br/>ping/pong · reconnect"]
+    CL --> TR{"Transport"}
+    TR --> ADB["AdbReverseTransport<br/>127.0.0.1:8765"]
+    TR --> WIFI["WifiTcpTransport<br/>mac-ip:8766"]
+    TR -.-> AOA["NativeUsbTransport (AOA)<br/>planned · handshake verified"]
+    AMES --> DS["DrawingSurfaceView<br/>local ink + diagnostics"]
+  end
+
+  ADB == "USB-C cable<br/>adbd tunnel" ==> LO
+  WIFI == "LAN TCP<br/>pairing HMAC" ==> LAN
+  AOA -. "USB bulk endpoints" .-> USBH["(future) IOUSBHost reader"]
+
+  subgraph Mac["macOS host · Swift"]
+    direction TB
+    LO["Loopback listener :8765<br/>trusted (local only)"] --> PC
+    LAN["LAN listener :8766<br/>Bonjour _inkbridge._tcp<br/>challenge required"] --> PC
+    USBH -.-> PC
+    PC["PeerConnection<br/>FrameDecoder · MessageCodec<br/>handshake · keep-alive · ClockSync"] --> SRV["InkServer"]
+    SRV --> ARB["PeerArbiter<br/>one active device · USB preferred"]
+    ARB --> ING["StrokeIngestor<br/>sequence de-dup · tool resolution"]
+    ING --> STORE["StrokeStore<br/>strokes · undo/redo · eraser · laser"]
+    STORE --> OV["OverlayView<br/>cached committed ink + live strokes"]
+    MAP["CoordinateMapper<br/>aspect fit · calibration"] --> OV
+    OV --> OW["OverlayWindow<br/>transparent · click-through<br/>.screenSaver level · all Spaces"]
+    TB2["ToolbarPanel (SwiftUI)<br/>non-activating"] --> MODEL["AppModel"]
+    HK["HotKeyCenter (Carbon)"] --> MODEL
+    MODEL --> ING
+    STORE --> ARCH["SessionArchive<br/>strokes.json · PNG · PDF"]
+    SC["ScreenCapture (optional)<br/>ScreenCaptureKit"] --> ARCH
+  end
+
+  OW --> Display["Selected Mac display"]

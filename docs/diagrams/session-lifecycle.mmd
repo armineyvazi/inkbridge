@@ -1,0 +1,22 @@
+%% Session and stroke lifecycle on the Mac.
+stateDiagram-v2
+  [*] --> Launch
+  Launch --> Recovering: previous run did not exit cleanly
+  Launch --> NewSession: clean exit last time
+  Recovering --> Active: load Sessions/{id}/strokes.json
+  NewSession --> Active
+
+  state Active {
+    [*] --> Idle
+    Idle --> Drawing: stroke.begin
+    Drawing --> Drawing: stroke.point
+    Drawing --> Idle: stroke.end (commit + undo entry)
+    Drawing --> Idle: stroke.cancel (discard; eraser rolled back)
+    Drawing --> Idle: device lost / active peer changed (commit what arrived)
+    Idle --> Idle: undo / redo / clear (clear is undoable)
+  }
+
+  Active --> Active: autosave every 5 s if revision changed (strokes.json + session.json)
+  Active --> Saved: Save (⌃⌥S) → strokes.json, preview.png, export.pdf [+ background.png]
+  Saved --> Active
+  Active --> [*]: quit → final autosave, cleanExit = true

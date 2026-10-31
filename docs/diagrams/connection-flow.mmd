@@ -1,0 +1,35 @@
+%% Connection lifecycle shared by USB (loopback) and Wi-Fi (LAN) transports.
+sequenceDiagram
+  autonumber
+  participant T as Tablet (InkBridgeClient)
+  participant H as Mac (PeerConnection)
+
+  T->>H: TCP connect (127.0.0.1:8765 via adb reverse, or mac-ip:8766)
+  H->>T: auth.challenge {nonce (32 random bytes), required: false on USB / true on Wi-Fi}
+  alt required
+    T->>H: device.hello {…, auth = HMAC-SHA256(code, nonce)}
+    alt HMAC valid
+      H->>T: device.ready {host_name, session_id}
+    else invalid / missing
+      H->>T: error {code: auth_failed}
+      H--xT: close · failure counted (5 in 60 s ⇒ LAN lockout)
+      Note over T: ClientState.Failed — no retry loop
+    end
+  else not required
+    T->>H: device.hello {…}
+    H->>T: device.ready
+  end
+
+  par every 2 s, both directions
+    H->>T: connection.ping {ping_id}
+    T->>H: connection.pong {ping_id, echo_timestamp_ns}
+  and
+    T->>H: connection.ping
+    H->>T: connection.pong
+  end
+
+  loop drawing
+    T->>H: stroke.begin / stroke.point / stroke.end (ordered, sequenced)
+  end
+
+  Note over T,H: No inbound bytes for 7 s ⇒ either side closes.<br/>Client retries 250 → 500 → 1000 → 2000 ms (±20 % jitter),<br/>re-handshakes, then flushes events queued during the outage.
