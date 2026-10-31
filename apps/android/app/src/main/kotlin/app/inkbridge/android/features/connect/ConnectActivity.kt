@@ -277,12 +277,42 @@ class ConnectActivity : InkActivity() {
         swap(c)
     }
 
-    /** Opened from the QR link: everything is known, including the certificate to pin. */
+    /**
+     * Opened from a QR link. Never pairs by itself: any app or web page can
+     * fire an `inkbridge://` link, so the user sees which Mac (name, address,
+     * certificate) and confirms with a tap, and is warned before an existing
+     * pairing is replaced. Only LAN addresses are accepted.
+     */
     private fun showLink(link: PairingLink) {
         if (link.expired()) return showList("That code has expired. Open Connect Device on the Mac for a new one.")
-        val address = link.addresses.firstOrNull() ?: return showList("The link has no address. Choose the Mac from the list instead.")
-        showCode(PairingRequest(link.hostName, address, link.port, "", link.fingerprint), prefilled = link.code)
-        submit()
+        val address = link.addresses.firstOrNull(::isLanAddress)
+            ?: return showList("That link does not point to a Mac on your local network. Choose the Mac from the list instead.")
+        val fp = link.fingerprint.take(8).joinToString(":") { "%02X".format(it) }
+        val c = Ink.column(this)
+        c.add(Ink.title(this, "Pair with ${link.hostName}?"))
+        c.add(Ink.body(this, "A pairing link was opened. Only continue if you just opened Connect Device on this Mac.")
+            .apply { setTextColor(Ink.GREY) }, Ink.dp(this, Ink.S))
+        c.add(Ink.infoRow(this, "Mac", link.hostName), Ink.dp(this, Ink.L))
+        c.add(Ink.infoRow(this, "Address", "$address:${link.port}"), 0)
+        c.add(Ink.infoRow(this, "Certificate", fp), 0)
+        c.add(Ink.caption(this, "The Mac's Connect Device window shows the same certificate."), Ink.dp(this, Ink.XS))
+        manager.paired.value?.takeIf { it.hostId != link.hostId }?.let {
+            c.add(problem("This replaces the pairing with ${it.name}."), Ink.dp(this, Ink.M))
+        }
+        c.add(Ink.button(this, "Pair", Ink.ButtonStyle.PRIMARY, R.drawable.ic_check) {
+            showCode(PairingRequest(link.hostName, address, link.port, "", link.fingerprint), prefilled = link.code)
+            submit()
+        }, Ink.dp(this, Ink.L))
+        c.add(Ink.button(this, "Cancel", Ink.ButtonStyle.SECONDARY) { showList(null) }, Ink.dp(this, Ink.S))
+        swap(c)
+    }
+
+    /** RFC 1918, link-local and unique-local only: a pairing link must not send the tablet across the internet. */
+    private fun isLanAddress(a: String): Boolean {
+        val ip = runCatching { java.net.InetAddress.getByName(a) }.getOrNull() ?: return false
+        if (!a.all { it.isDigit() || it == '.' || it == ':' || it.lowercaseChar() in 'a'..'f' }) return false  // literals only, no DNS
+        return ip.isSiteLocalAddress || ip.isLinkLocalAddress ||
+            (ip is java.net.Inet6Address && (ip.address[0].toInt() and 0xFE) == 0xFC)
     }
 
     private fun problem(text: String) = Ink.row(this).apply {

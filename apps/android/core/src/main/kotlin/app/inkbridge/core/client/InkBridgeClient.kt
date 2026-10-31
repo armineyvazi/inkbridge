@@ -320,6 +320,12 @@ class InkBridgeClient(
             val challenge = inbox.receive().payload as? Payload.AuthChallenge
                 ?: throw ProtocolException("expected auth.challenge")
             val fingerprint = transport.peerFingerprint ?: ByteArray(0)
+            // The expected auth level comes from our side, never from the host's `required` flag:
+            // only the loopback (USB) host may skip authentication. A Wi-Fi host that claims it
+            // needs nothing is either broken or an impostor fishing for strokes.
+            if (!challenge.required && transport.kind != TransportKind.USB) {
+                throw Rejected("this Mac did not ask this tablet to authenticate; refusing to connect", FailureKind.IDENTITY_CHANGED)
+            }
             val creds = if (challenge.required) credentials() else Credentials.None
             _state.value = ClientState.Authenticating(transport.kind, creds is Credentials.Pair)
             val (mode, auth) = when (creds) {
@@ -338,6 +344,7 @@ class InkBridgeClient(
                 device.deviceId, device.deviceName, device.model, device.androidApi, streamId,
                 w, h, device.capabilities, auth, mode,
             )))
+            var granted = false
             while (true) {
                 when (val reply = inbox.receive().payload) {
                     is Payload.PairGranted -> {
@@ -346,9 +353,16 @@ class InkBridgeClient(
                         if (!PairingAuth.verifyHost(reply.proof, code, challenge.nonce, fingerprint)) {
                             throw Rejected("the Mac could not prove it showed this code", FailureKind.IDENTITY_CHANGED)
                         }
+                        granted = true
                         onPaired?.invoke(PairingResult(reply.hostId, reply.hostName, reply.token, fingerprint))
                     }
-                    is Payload.Ready -> return@withTimeout reply
+                    is Payload.Ready -> {
+                        // Pairing is only complete with a verified pair.granted; a host that skips it never proved the code.
+                        if (creds is Credentials.Pair && !granted) {
+                            throw Rejected("the Mac did not confirm the code", FailureKind.IDENTITY_CHANGED)
+                        }
+                        return@withTimeout reply
+                    }
                     is Payload.Error -> throw rejection(reply, creds)
                     else -> throw ProtocolException("expected device.ready, got ${reply.type}")
                 }

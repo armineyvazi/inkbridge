@@ -53,6 +53,8 @@ private class FakeHost(
     @Volatile var session: String = "session-1",
     /** Answers pair.granted with a wrong proof, like an impostor that does not know the code. */
     private val forgeHostProof: Boolean = false,
+    /** Accepts a pair proof but never sends pair.granted. */
+    private val skipGrant: Boolean = false,
 ) : AutoCloseable {
     val server = ServerSocket(0)
     val port get() = server.localPort
@@ -115,6 +117,7 @@ private class FakeHost(
             when (h.authMode) {
                 AuthMode.PAIR -> {
                     if (code == null || h.auth != PairingAuth.pairProof(code, nonce, fp)) return write(s, Payload.Error("auth_failed", "wrong pairing code"))
+                    if (skipGrant) return write(s, Payload.Ready("Fake Mac", session, hostId, resume))
                     val token = PairingAuth.randomHex(32)
                     tokens[h.deviceId] = token
                     val proof = if (forgeHostProof) PairingAuth.randomHex(32) else PairingAuth.hostProof(code, nonce, fp)
@@ -259,6 +262,34 @@ class InkBridgeClientTest {
             val s = awaitState(c) { it is ClientState.Failed }
             assertEquals(FailureKind.IDENTITY_CHANGED, (s as ClientState.Failed).kind)
             assertTrue(!paired, "a token from an unproven Mac must not be stored")
+        }
+    }
+
+    @Test
+    fun wifiHostThatAsksForNothingIsRefused() {
+        // A rogue host on the LAN says "no auth needed" to receive strokes.
+        FakeHost(code = null, required = false).use { host ->
+            val c = InkBridgeClient(scope, { TcpTransport("127.0.0.1", host.port, TransportKind.WIFI) }, device,
+                { Credentials.Pair("K7QW-M3XP") }, policy = ReconnectionPolicy(initialMs = 50, maxMs = 200))
+            c.start()
+            val s = awaitState(c) { it is ClientState.Failed }
+            assertEquals(FailureKind.IDENTITY_CHANGED, (s as ClientState.Failed).kind)
+            Thread.sleep(100)
+            assertTrue(host.received.none { it.payload is Payload.Hello }, "nothing may be sent to it")
+        }
+    }
+
+    @Test
+    fun pairingWithoutPairGrantedIsRefused() {
+        // Host asks for proof but then skips pair.granted (never proved it knows the code).
+        FakeHost(code = "K7QW-M3XP", skipGrant = true).use { host ->
+            var paired = false
+            val c = client(host, code = "K7QW-M3XP")
+            c.onPaired = { paired = true }
+            c.start()
+            val s = awaitState(c) { it is ClientState.Failed }
+            assertEquals(FailureKind.IDENTITY_CHANGED, (s as ClientState.Failed).kind)
+            assertTrue(!paired)
         }
     }
 

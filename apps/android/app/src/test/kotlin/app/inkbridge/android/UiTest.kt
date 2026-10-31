@@ -146,14 +146,27 @@ class UiTest {
     }
 
     @Test
-    fun qrLinkPairsWithThePinnedCertificate() {
+    fun qrLinkAsksBeforePairingThenPinsTheCertificate() {
         val exp = System.currentTimeMillis() / 1000 + 300
         val fp = "a0a1a2a3a4a5a6a7a8a9aaabacadaeafb0b1b2b3b4b5b6b7b8b9babbbcbdbebf"
         val link = "inkbridge://pair?v=3&name=Studio%20Mac&id=h1&addr=192.168.1.20&port=8766&code=K7QWM3XP&fp=$fp&exp=$exp"
-        Robolectric.buildActivity(ConnectActivity::class.java, Intent(Intent.ACTION_VIEW, Uri.parse(link))).setup()
+        val a = Robolectric.buildActivity(ConnectActivity::class.java, Intent(Intent.ACTION_VIEW, Uri.parse(link))).setup().get()
+        assertNull(app.connection.pairing.value, "a link alone must never start pairing")
+        assertTrue("Pair with Studio Mac?" in a.window.decorView.texts())
+        assertTrue("A0:A1:A2:A3:A4:A5:A6:A7" in a.window.decorView.texts(), "certificate shown for comparison")
+        a.window.decorView.byLabel("Pair").performClick()
         val req = assertNotNull(app.connection.pairing.value)
         assertEquals("Studio Mac", req.name)
         assertEquals(fp, req.pin!!.joinToString("") { "%02x".format(it) })
+    }
+
+    @Test
+    fun qrLinkToAPublicAddressIsRefused() {
+        val exp = System.currentTimeMillis() / 1000 + 300
+        val link = "inkbridge://pair?v=3&name=M&id=h1&addr=8.8.8.8&port=8766&code=K7QWM3XP&fp=${"a0".repeat(32)}&exp=$exp"
+        val a = Robolectric.buildActivity(ConnectActivity::class.java, Intent(Intent.ACTION_VIEW, Uri.parse(link))).setup().get()
+        assertTrue(a.window.decorView.texts().any { it.contains("local network") })
+        assertNull(app.connection.pairing.value)
     }
 
     @Test
