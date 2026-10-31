@@ -24,7 +24,9 @@ class CanvasView @JvmOverloads constructor(context: Context, attrs: AttributeSet
 
     var source: AndroidMotionEventSource? = null
     var renderer: CanvasRenderer? = null
-    val diagnostics = StylusDiagnostics()
+    val diagnostics = StylusDiagnostics.shared
+    /** Off: fingers do nothing (for people who rest their hand on the screen). */
+    var fingerNavigation = true
     var onSurfaceChanged: ((Int, Int) -> Unit)? = null
     var onDiagnostics: ((String) -> Unit)? = null
     /** Viewport changes from gestures; [final] is true when the gesture ends. */
@@ -64,7 +66,7 @@ class CanvasView @JvmOverloads constructor(context: Context, attrs: AttributeSet
 
     override fun onTouchEvent(ev: MotionEvent): Boolean {
         val tool = ev.getToolType(0)
-        if (tool == MotionEvent.TOOL_TYPE_FINGER) return navigate(ev)
+        if (tool == MotionEvent.TOOL_TYPE_FINGER) return if (fingerNavigation) navigate(ev) else true
         if (ev.actionMasked == MotionEvent.ACTION_DOWN) {
             // Deliver every input event as it arrives instead of batching to vsync.
             requestUnbufferedDispatch(ev)

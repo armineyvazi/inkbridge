@@ -3,40 +3,27 @@
 InkBridge is local-only. It has no cloud service, account, analytics or telemetry.
 Nothing leaves the Mac or the tablet except the stroke stream between the two.
 
-## Threat model
+## Threat model (protocol v3)
+
+The Wi-Fi listener speaks **TLS 1.2+ with a self-signed certificate that devices pin**,
+and every connection must prove a secret bound to that certificate. Design:
+[wireless-connection.md](wireless-connection.md), decision: [ADR-007](../decisions/ADR-007-tls-pairing.md).
 
 | Threat | Mitigation | Status |
 |--------|-----------|--------|
-| Someone on the LAN draws on your screen | The LAN listener requires `HMAC-SHA256(pairing code, fresh nonce)` before accepting any stroke | implemented, tested |
-| Replay of a captured handshake | A new 256-bit nonce per connection | implemented |
-| Online guessing of the pairing code | ~40-bit code (8 chars from a 31-symbol alphabet). Failures are tracked **per remote IP**: 5 in 60 s locks that IP out for 30 s, doubling per repeat up to 15 min. A global brake (50 failures/min from all hosts) limits distributed guessing. Stalled Wi-Fi handshakes count as failures | implemented, tested (`AuthThrottleTests`) |
-| Someone on the LAN locks the real user out | Lockout is per IP, so another machine's failures do not block your tablet. The global brake can still be triggered by a determined multi-host attacker; that is a deliberate trade-off against unlimited guessing | implemented |
-| Idle LAN sockets exhaust connection slots | Pending handshakes have their own per-transport cap (4); only authenticated peers count toward the peer cap (4). LAN squatters cannot block USB | implemented, tested |
-| **Offline brute force of the pairing code** | **Not mitigated yet.** An eavesdropper who captures one `auth.challenge` nonce and the device's HMAC response can test codes offline. ~40 bits falls in minutes to hours on a GPU, after which they can pair. Fix: TLS with a pinned certificate (QR) or a PAKE (SPAKE2), Phase 5. Until then, regenerating the code (Settings → New code) after using Wi-Fi on an untrusted network limits the window | **open, Phase 5** |
-| A malformed or hostile message crashes the host | Length check before buffering (64 KiB max); every field type- and range-checked; NaN/∞ rejected; string and array caps; no force-unwraps on peer data | implemented; fixtures test each class |
+| Someone on the LAN draws on your screen | Every LAN connection must present a device token (256-bit, issued at pairing) or, while Connect Device is open, prove the one-time code. Proofs are `HMAC-SHA256(secret, label ‖ 0 ‖ nonce ‖ cert fingerprint)` | implemented, tested |
+| Eavesdropping or tampering on Wi-Fi | All Wi-Fi traffic is TLS; the device pins the Mac's certificate SHA-256 | implemented, tested (Swift TLS tests, JVM↔Swift e2e, real BOOX) |
+| Man in the middle at first pairing | The device's proof covers the fingerprint *it saw*; a MITM must present its own certificate, so its relayed proof fails at the real Mac. The Mac answers with its own proof (`pair.granted.proof`), so a fake Mac that does not know the code is detected before anything is stored. A QR link carries the fingerprint, which pins from the first byte | implemented, tested (`testWifiRejections`, `impostorWithoutTheCodeIsDetected`) |
+| Replay of a captured handshake | Fresh 256-bit nonce per connection; separate labels for device, host and token proofs | implemented, tested |
+| Online guessing of the code | Codes exist only while Connect Device is open (5 min), work once, and are voided after 5 wrong guesses in total (from any address). Per-IP lockout (30 s doubling to 15 min) and a global brake (50/min) still apply | implemented, tested |
+| Offline brute force of the code | The code (~40 bits) is never sent; a passive eavesdropper sees only TLS. An *active* attacker who stands up a fake Mac during the 5-minute window gets one device proof and could brute-force it offline, but the code is single-use and expires, and the device would show "the Mac could not prove it showed this code". Residual, documented | mitigated |
+| A forgotten or stolen tablet keeps access | Mac: Connect Device / Settings → Forget removes the token and drops the link at once. Re-pairing replaces the token | implemented, tested |
+| An address now points to a different Mac (DHCP reuse) | The device checks `host_id` in `auth.challenge` before sending any token proof, and the TLS pin fails anyway | implemented, tested |
+| A malformed or hostile message crashes the host | Length check before buffering (64 KiB max); every field type- and range-checked; NaN/∞ rejected; string and array caps | implemented; fixtures test each class |
 | Resource exhaustion | Max 4 authenticated peers, 4 pending handshakes per transport; 5 s handshake timeout; 7 s idle timeout; > 50 bad messages ⇒ disconnect | implemented |
-| A local process injects strokes over loopback | The loopback listener is unauthenticated **by design**: anything able to connect to 127.0.0.1 already runs as you | accepted risk, documented |
-| **Eavesdropping or tampering on Wi-Fi** | **Not mitigated yet.** After authentication the stream is plaintext. Strokes are not secret, but an on-path attacker could inject strokes into an authenticated session | **open: TLS is Phase 5** |
-| Screen contents leak | No screen capture unless the user enables it; capture is saved only locally; nothing transmitted | implemented |
-
-## Why not TLS today
-
-The brief asks for TLS on Wi-Fi. It is not in this milestone, for two reasons:
-
-1. TLS with pre-shared keys (the natural fit for a pairing code) is supported by
-   Network.framework but **not exposed by Android's standard `SSLSocket`/Conscrypt
-   APIs**. It would need BoringSSL through JNI or a bundled TLS library.
-2. The alternative is certificate pinning: the Mac creates a self-signed identity
-   in the Keychain and the QR pairing code carries its SHA-256 fingerprint. This is
-   the planned approach. It needs a QR scan on the tablet, Keychain identity
-   management on the Mac, and a custom `TrustManager` on Android. That is real work,
-   and it should be done properly rather than half done.
-
-Until then, the honest guidance is: **use Wi-Fi mode on networks you trust**, or use
-USB. The pairing challenge keeps casual LAN users out, but it does not resist a
-capable eavesdropper: one sniffed handshake is enough to brute-force the short code
-offline. TLS with a pinned certificate removes both problems, because the handshake
-is then encrypted and the code is no longer the only secret.
+| A local process injects strokes over loopback | The loopback (USB) listener is unauthenticated plain TCP **by design**: anything able to connect to 127.0.0.1 already runs as you | accepted risk |
+| Secrets at rest | Mac: TLS key, host ID and device tokens in `~/Library/Application Support/InkBridge/` with mode 0600 (not the Keychain: the ad-hoc-signed app would re-prompt after every rebuild). Tablet: token and pin in app-private storage; `allowBackup=false`. Neither is ever logged or shown | implemented; Keychain once the app is Developer-ID signed |
+| Screen contents leak | No screen capture unless the user enables it; saved only locally; never transmitted | implemented |
 
 ## Privacy
 
@@ -45,7 +32,7 @@ is then encrypted and the code is no longer the only secret.
 - The diagnostic report contains versions, timings and display names only, and is
   written locally for the user to share or not.
 - macOS permissions used:
-  - Local Network (Wi-Fi mode)
+  - Local Network (Wi-Fi mode); the macOS firewall may also ask to allow incoming connections
   - Screen Recording (only if screenshots are enabled)
   - Nothing else: hot keys use Carbon, so no Accessibility permission is needed.
 

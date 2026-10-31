@@ -35,8 +35,9 @@ make -C apps/android install
 scripts/adb-usb.sh --watch      # keeps the USB tunnel up across replugs
 ```
 
-Open InkBridge on the tablet and draw. For Wi-Fi, open Settings on the tablet, pick
-Wi-Fi, and enter the pairing code from the Mac's menu bar. Details:
+**Wi-Fi (default, no cable):** on the Mac choose menu-bar pen → Connect Device… (⌃⌥K).
+On the tablet tap Connect to Mac, pick the Mac and type the one-time code. After that
+it reconnects by itself. USB is optional. Details:
 [setup](docs/implementation/setup.md).
 
 No tablet yet? `scripts/e2e.sh` runs the Kotlin client against the Swift host with a
@@ -53,7 +54,8 @@ simulated pen.
 | Toolbar | expanded / compact / minimal; bottom, top, left, right or anywhere; hide, then reopen from the menu-bar icon |
 | Shortcuts | ⌃⌥ P/H/E/L tools · Z undo · ⇧Z redo · C clear · F fit · 0 home · O hide · S save · T toolbar |
 | Sessions | autosave every 5 s, crash recovery; **Save…** to any folder: full page (PNG/JPEG), transparent ink layer (PNG + SVG), editable strokes, background, mapping metadata |
-| Connection | USB (adb reverse) or Wi-Fi (Bonjour + pairing code); auto-reconnect < 3 s; USB preferred when both are present |
+| Connection | Wi-Fi first: Bonjour discovery, TLS with a pinned certificate, one-time pairing code (or QR link), device tokens; reconnect 163 ms after Wi-Fi returns; strokes lost on a dead link are re-sent. Optional USB (adb reverse) |
+| Tablet app | E-ink-first UI: dashboard, Connect to Mac, full-screen canvas with a slim floating bar, Settings, Diagnostics |
 | Diagnostics | live RTT and pen-to-Mac latency; exportable report; on-tablet stylus readout |
 
 ## Repository
@@ -70,8 +72,8 @@ docs/             research, architecture, protocol, ADRs, diagrams
 ## Tests
 
 ```bash
-make -C apps/macos test     # 80 Swift tests (unit + socket integration)
-make -C apps/android test   # 43 Kotlin tests (unit + socket integration)
+make -C apps/macos test     # 87 Swift tests (unit, socket and TLS integration)
+make -C apps/android test   # 56 Kotlin core + 9 Robolectric UI tests
 scripts/e2e.sh && scripts/e2e.sh wifi
 ```
 

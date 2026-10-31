@@ -4,7 +4,7 @@ import XCTest
 final class MessageCodecTests: XCTestCase {
     func testEveryValidFixtureDecodesAndRoundTrips() throws {
         let files = try Fixtures.files("valid")
-        XCTAssertEqual(files.count, 22)
+        XCTAssertEqual(files.count, 23)
         for url in files {
             let data = try Data(contentsOf: url)
             let message = try MessageCodec.decode(data)
@@ -27,6 +27,12 @@ final class MessageCodecTests: XCTestCase {
         XCTAssertThrowsError(try MessageCodec.decode(Fixtures.data("invalid/v1-message.json"))) {
             XCTAssertEqual($0 as? ProtocolError, .unsupportedVersion(1), "v1 peers are refused, not misread")
         }
+        XCTAssertThrowsError(try MessageCodec.decode(Fixtures.data("invalid/v2-message.json"))) {
+            XCTAssertEqual($0 as? ProtocolError, .unsupportedVersion(2), "v2 had no TLS binding; refused")
+        }
+        XCTAssertThrowsError(try MessageCodec.decode(Fixtures.data("invalid/unknown-auth-mode.json"))) {
+            XCTAssertEqual($0 as? ProtocolError, .invalidField("auth_mode"))
+        }
         XCTAssertThrowsError(try MessageCodec.decode(Fixtures.data("invalid/missing-stroke-id.json"))) {
             XCTAssertEqual($0 as? ProtocolError, .missingField("stroke_id"))
         }
@@ -36,7 +42,7 @@ final class MessageCodecTests: XCTestCase {
     }
 
     func testUnknownTypeIsRecoverable() {
-        let data = Data(#"{"version":2,"type":"future.thing","sequence":1,"timestamp_ns":1}"#.utf8)
+        let data = Data(#"{"version":3,"type":"future.thing","sequence":1,"timestamp_ns":1}"#.utf8)
         XCTAssertThrowsError(try MessageCodec.decode(data)) { error in
             XCTAssertEqual(error as? ProtocolError, .unknownType("future.thing"))
             XCTAssertTrue((error as? ProtocolError)?.isRecoverable == true)
@@ -44,7 +50,7 @@ final class MessageCodecTests: XCTestCase {
     }
 
     func testBooleanFieldRejectsNumber() {
-        let data = Data(#"{"version":2,"type":"auth.challenge","sequence":1,"timestamp_ns":1,"nonce":"00","required":1}"#.utf8)
+        let data = Data(#"{"version":3,"type":"auth.challenge","sequence":1,"timestamp_ns":1,"nonce":"00","required":1,"host_id":"h"}"#.utf8)
         XCTAssertThrowsError(try MessageCodec.decode(data))
     }
 
@@ -134,11 +140,36 @@ final class PairingAuthTests: XCTestCase {
     func testMatchesSharedVector() throws {
         let v = try JSONSerialization.jsonObject(with: Fixtures.data("auth-vector.json")) as! [String: String]
         let nonce = Data(hex: v["nonce_hex"]!)!
-        XCTAssertEqual(PairingAuth.normalize(v["pairing_code"]!), v["normalized_key"])
-        XCTAssertEqual(PairingAuth.response(code: v["pairing_code"]!, nonce: nonce), v["expected_response_hex"])
-        XCTAssertTrue(PairingAuth.verify(response: v["expected_response_hex"]!, code: "k7qw m3xp", nonce: nonce))
-        XCTAssertFalse(PairingAuth.verify(response: v["expected_response_hex"]!, code: "K7QW-M3XQ", nonce: nonce))
-        XCTAssertFalse(PairingAuth.verify(response: "zz", code: "K7QW-M3XP", nonce: nonce))
+        let fp = Data(hex: v["fingerprint_hex"]!)!
+        let token = Data(hex: v["token_hex"]!)!
+        let code = v["pairing_code"]!
+        XCTAssertEqual(PairingAuth.normalize(code), v["normalized_key"])
+        XCTAssertEqual(PairingAuth.pairProof(code: code, nonce: nonce, fingerprint: fp), v["pair_proof_hex"])
+        XCTAssertEqual(PairingAuth.hostProof(code: code, nonce: nonce, fingerprint: fp), v["host_proof_hex"])
+        XCTAssertEqual(PairingAuth.tokenProof(token: token, nonce: nonce, fingerprint: fp), v["token_proof_hex"])
+        XCTAssertTrue(PairingAuth.verifyPair(v["pair_proof_hex"]!, code: "k7qw m3xp", nonce: nonce, fingerprint: fp))
+        XCTAssertFalse(PairingAuth.verifyPair(v["pair_proof_hex"]!, code: "K7QW-M3XQ", nonce: nonce, fingerprint: fp))
+        XCTAssertFalse(PairingAuth.verifyPair("zz", code: code, nonce: nonce, fingerprint: fp))
+        XCTAssertTrue(PairingAuth.verifyToken(v["token_proof_hex"]!, token: token, nonce: nonce, fingerprint: fp))
+    }
+
+    func testProofsAreBoundToFingerprintAndPurpose() throws {
+        let nonce = PairingAuth.generateNonce()
+        let fp = Data(repeating: 1, count: 32)
+        let proof = PairingAuth.pairProof(code: "K7QW-M3XP", nonce: nonce, fingerprint: fp)
+        // A man in the middle shows its own certificate: the device's proof no longer verifies.
+        XCTAssertFalse(PairingAuth.verifyPair(proof, code: "K7QW-M3XP", nonce: nonce, fingerprint: Data(repeating: 2, count: 32)))
+        // The host's answer can never be replayed as a device proof, or vice versa.
+        XCTAssertNotEqual(proof, PairingAuth.hostProof(code: "K7QW-M3XP", nonce: nonce, fingerprint: fp))
+        XCTAssertFalse(PairingAuth.verifyPair(proof, code: "K7QW-M3XP", nonce: PairingAuth.generateNonce(), fingerprint: fp))
+    }
+
+    func testPairingTicketExpiresAndVoidsAfterFailures() {
+        var t = PairingTicket(code: "K7QW-M3XP", expiresAt: Date().addingTimeInterval(60))
+        XCTAssertTrue(t.isValid())
+        XCTAssertFalse(t.isValid(at: Date().addingTimeInterval(61)))
+        t.failures = PairingTicket.maxFailures
+        XCTAssertFalse(t.isValid())
     }
 
     func testGeneratedCodesAreWellFormed() {
@@ -148,5 +179,19 @@ final class PairingAuthTests: XCTestCase {
             XCTAssertEqual(PairingAuth.normalize(code).count, 8)
             XCTAssertFalse(code.contains("0") || code.contains("O") || code.contains("1") || code.contains("I"))
         }
+    }
+}
+
+final class PairingLinkTests: XCTestCase {
+    func testSharedFixtureParsesAndRoundTrips() throws {
+        let text = String(decoding: try Fixtures.data("pairing-link.txt"), as: UTF8.self).trimmingCharacters(in: .whitespacesAndNewlines)
+        let link = try XCTUnwrap(PairingLink(url: URL(string: text)!))
+        XCTAssertEqual(link.hostName, "Armin’s MacBook Pro")
+        XCTAssertEqual(link.addresses, ["192.168.1.20", "10.0.0.5"])
+        XCTAssertEqual(link.port, 8766)
+        XCTAssertEqual(link.code, "K7QWM3XP")
+        XCTAssertEqual(link.fingerprint.count, 32)
+        XCTAssertEqual(PairingLink(url: link.url), link)
+        XCTAssertNil(PairingLink(url: URL(string: text.replacingOccurrences(of: "v=3", with: "v=2"))!))
     }
 }

@@ -1,19 +1,30 @@
 import CryptoKit
 import Foundation
 
-/// Challenge-response authentication for LAN connections.
+/// Proofs exchanged in the LAN handshake (protocol v3).
 ///
-/// The host shows a short pairing code; the user types it on the tablet.
-/// On connect the host sends a random nonce, and the device answers with
-/// HMAC-SHA256(key: normalized code, message: nonce). The code itself never
-/// crosses the network, and a captured response cannot be replayed because
-/// every connection gets a fresh nonce.
+/// Every proof is `HMAC-SHA256(key, label ‖ 0x00 ‖ nonce ‖ fingerprint)`:
 ///
-/// This authenticates the device; it does not encrypt the stroke stream.
-/// See docs/architecture/security.md for the threat model and the TLS plan.
+/// - `nonce` is the 32 random bytes from this connection's `auth.challenge`,
+///   so a captured proof cannot be replayed on another connection.
+/// - `fingerprint` is the SHA-256 of the Mac's TLS certificate *as the device
+///   saw it*. A man in the middle has to present its own certificate, so the
+///   device would prove over the wrong fingerprint and the Mac rejects it.
+///   (Empty on the loopback/USB listener, which has no TLS and no auth.)
+/// - `label` separates the three uses, so no proof can stand in for another.
+///
+/// Keys: the short-lived pairing code for first contact (device proves
+/// `pair`, the Mac answers with `host`, so both sides know the other saw the
+/// code); afterwards the 256-bit token the Mac issued in `pair.granted`.
+/// Mirrors PairingAuth.kt; both are checked against
+/// protocol/fixtures/auth-vector.json. See docs/architecture/security.md.
 public enum PairingAuth {
     /// Alphabet without look-alike characters (no 0/O, 1/I/L).
     static let alphabet = Array("ABCDEFGHJKMNPQRSTUVWXYZ23456789")
+
+    public static let pairLabel = "inkbridge-v3-pair"
+    public static let hostLabel = "inkbridge-v3-host"
+    public static let tokenLabel = "inkbridge-v3-token"
 
     /// A new random code formatted as `XXXX-XXXX` (~40 bits of entropy).
     public static func generateCode() -> String {
@@ -27,20 +38,54 @@ public enum PairingAuth {
         code.uppercased().filter { $0.isLetter || $0.isNumber }
     }
 
-    public static func generateNonce() -> Data {
-        Data(SymmetricKey(size: .bits256).withUnsafeBytes { Array($0) })
+    public static func generateNonce() -> Data { randomBytes(32) }
+
+    /// A new device token (256 bits).
+    public static func generateToken() -> Data { randomBytes(32) }
+
+    static func randomBytes(_ n: Int) -> Data {
+        Data(SymmetricKey(size: SymmetricKeySize(bitCount: n * 8)).withUnsafeBytes { Array($0) })
     }
 
-    public static func response(code: String, nonce: Data) -> String {
-        let key = SymmetricKey(data: Data(normalize(code).utf8))
-        return HMAC<SHA256>.authenticationCode(for: nonce, using: key).hexString
+    // MARK: Proofs
+
+    public static func pairProof(code: String, nonce: Data, fingerprint: Data) -> String {
+        proof(key: codeKey(code), label: pairLabel, nonce: nonce, fingerprint: fingerprint)
     }
 
-    /// Constant-time verification of a device's response.
-    public static func verify(response hex: String, code: String, nonce: Data) -> Bool {
+    public static func hostProof(code: String, nonce: Data, fingerprint: Data) -> String {
+        proof(key: codeKey(code), label: hostLabel, nonce: nonce, fingerprint: fingerprint)
+    }
+
+    public static func tokenProof(token: Data, nonce: Data, fingerprint: Data) -> String {
+        proof(key: SymmetricKey(data: token), label: tokenLabel, nonce: nonce, fingerprint: fingerprint)
+    }
+
+    /// Constant-time check of a device's `.pair` proof.
+    public static func verifyPair(_ hex: String, code: String, nonce: Data, fingerprint: Data) -> Bool {
+        verify(hex, key: codeKey(code), label: pairLabel, nonce: nonce, fingerprint: fingerprint)
+    }
+
+    /// Constant-time check of a device's `.token` proof.
+    public static func verifyToken(_ hex: String, token: Data, nonce: Data, fingerprint: Data) -> Bool {
+        verify(hex, key: SymmetricKey(data: token), label: tokenLabel, nonce: nonce, fingerprint: fingerprint)
+    }
+
+    private static func codeKey(_ code: String) -> SymmetricKey {
+        SymmetricKey(data: Data(normalize(code).utf8))
+    }
+
+    private static func message(_ label: String, _ nonce: Data, _ fingerprint: Data) -> Data {
+        Data(label.utf8) + Data([0]) + nonce + fingerprint
+    }
+
+    private static func proof(key: SymmetricKey, label: String, nonce: Data, fingerprint: Data) -> String {
+        HMAC<SHA256>.authenticationCode(for: message(label, nonce, fingerprint), using: key).hexString
+    }
+
+    private static func verify(_ hex: String, key: SymmetricKey, label: String, nonce: Data, fingerprint: Data) -> Bool {
         guard let mac = Data(hex: hex) else { return false }
-        let key = SymmetricKey(data: Data(normalize(code).utf8))
-        return HMAC<SHA256>.isValidAuthenticationCode(mac, authenticating: nonce, using: key)
+        return HMAC<SHA256>.isValidAuthenticationCode(mac, authenticating: message(label, nonce, fingerprint), using: key)
     }
 }
 
@@ -49,7 +94,9 @@ extension Sequence where Element == UInt8 {
 }
 
 extension Data {
-    init?(hex: String) {
+    public var hexString: String { [UInt8](self).hexString }
+
+    public init?(hex: String) {
         guard hex.count % 2 == 0 else { return nil }
         var bytes = [UInt8]()
         bytes.reserveCapacity(hex.count / 2)

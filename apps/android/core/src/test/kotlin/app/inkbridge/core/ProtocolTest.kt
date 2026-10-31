@@ -14,6 +14,7 @@ import kotlinx.serialization.json.jsonPrimitive
 import java.io.File
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFalse
 import kotlin.test.assertFailsWith
 import kotlin.test.assertNull
 import kotlin.test.assertTrue
@@ -29,7 +30,7 @@ class MessageCodecTest {
     @Test
     fun everyValidFixtureDecodesAndRoundTrips() {
         val files = Fixtures.files("valid")
-        assertEquals(22, files.size)
+        assertEquals(23, files.size)
         for (f in files) {
             val m = MessageCodec.decode(f.readBytes())
             assertTrue(f.name.startsWith(m.payload.type + "."), f.name)
@@ -47,7 +48,7 @@ class MessageCodecTest {
     @Test
     fun unknownTypeIsRecoverable() {
         val e = assertFailsWith<ProtocolException> {
-            MessageCodec.decode("""{"version":2,"type":"future.thing","sequence":1,"timestamp_ns":1}""".encodeToByteArray())
+            MessageCodec.decode("""{"version":3,"type":"future.thing","sequence":1,"timestamp_ns":1}""".encodeToByteArray())
         }
         assertTrue(e.recoverable)
     }
@@ -55,7 +56,7 @@ class MessageCodecTest {
     @Test
     fun booleanFieldRejectsNumber() {
         assertFailsWith<ProtocolException> {
-            MessageCodec.decode("""{"version":2,"type":"auth.challenge","sequence":1,"timestamp_ns":1,"nonce":"00","required":1}""".encodeToByteArray())
+            MessageCodec.decode("""{"version":3,"type":"auth.challenge","sequence":1,"timestamp_ns":1,"nonce":"00","required":1,"host_id":"h"}""".encodeToByteArray())
         }
     }
 
@@ -157,8 +158,14 @@ class PairingAuthTest {
     fun matchesSharedVector() {
         val v = Json.parseToJsonElement(Fixtures.bytes("auth-vector.json").decodeToString()).jsonObject
         fun s(k: String) = v[k]!!.jsonPrimitive.content
+        val fp = PairingAuth.hexToBytes(s("fingerprint_hex"))
         assertEquals(s("normalized_key"), PairingAuth.normalize(s("pairing_code")))
-        assertEquals(s("expected_response_hex"), PairingAuth.response(s("pairing_code"), s("nonce_hex")))
-        assertEquals(s("expected_response_hex"), PairingAuth.response("k7qw m3xp", s("nonce_hex")))
+        assertEquals(s("pair_proof_hex"), PairingAuth.pairProof("k7qw m3xp", s("nonce_hex"), fp))
+        assertEquals(s("host_proof_hex"), PairingAuth.hostProof(s("pairing_code"), s("nonce_hex"), fp))
+        assertEquals(s("token_proof_hex"), PairingAuth.tokenProof(s("token_hex"), s("nonce_hex"), fp))
+        assertTrue(PairingAuth.verifyHost(s("host_proof_hex"), s("pairing_code"), s("nonce_hex"), fp))
+        assertFalse(PairingAuth.verifyHost(s("host_proof_hex"), "K7QW-M3XQ", s("nonce_hex"), fp))
+        assertFalse(PairingAuth.verifyHost(s("host_proof_hex"), s("pairing_code"), s("nonce_hex"), ByteArray(32)),
+            "bound to the certificate fingerprint")
     }
 }

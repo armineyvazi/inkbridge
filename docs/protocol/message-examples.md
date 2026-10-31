@@ -20,7 +20,7 @@ decoders must reject.
  "auth":"ffeb7f29884dec7b6c86d90e51c1d83b0ee11b041c6f814665ae78212c886834"}
 ```
 
-`auth` is HMAC-SHA256 with key `K7QWM3XP` (the pairing code `K7QW-M3XP`, normalized)
+`auth` is the v3 token proof, `HMAC-SHA256(token, "inkbridge-v3-token" ‖ 0x00 ‖ nonce ‖ certificate fingerprint)` from `protocol/fixtures/auth-vector.json`
 over the 32 nonce bytes. The vector is in `protocol/fixtures/auth-vector.json`, and
 `openssl` reproduces it:
 
@@ -82,7 +82,7 @@ Strokes left the document, and a resync starts:
 ## Errors
 
 ```json
-{"version":2,"type":"error","sequence":3,"timestamp_ns":3000,"code":"auth_failed","message":"pairing code mismatch"}
+{"version":3,"type":"error","sequence":3,"timestamp_ns":3000,"code":"auth_failed","message":"wrong pairing code"}
 ```
 
 ## Rejected (from `invalid/`)

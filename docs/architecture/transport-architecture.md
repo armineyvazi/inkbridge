@@ -5,7 +5,7 @@ flowchart LR
   subgraph Device
     C[InkBridgeClient] --> T{{Transport}}
     T --> A[AdbReverseTransport<br/>TCP 127.0.0.1:8765]
-    T --> W[WifiTcpTransport<br/>TCP host:8766]
+    T --> W[TlsTransport<br/>TLS host:8766, pinned]
     T -.-> N[NativeUsbTransport<br/>AOA bulk · planned]
   end
   A -- adbd over USB --> L1[Mac loopback :8765]
@@ -30,8 +30,10 @@ tag exists only for the UI and for `PeerArbiter`'s preference.
   exception is the disconnect signal.
 - Writes go through a `BufferedOutputStream` flushed per frame, under a mutex.
 
-`AdbReverseTransport` and `WifiTcpTransport` are `TcpTransport` with fixed
-endpoints. They differ only in address and `kind`.
+`AdbReverseTransport` is a `TcpTransport` to 127.0.0.1. `TlsTransport` wraps the
+same socket in TLS (`SSLSocket` with a pinning trust manager) and exposes the
+certificate fingerprint the handshake proofs are bound to. Everything above
+`Transport` is identical for both.
 
 ## Host side
 
@@ -40,13 +42,14 @@ endpoints. They differ only in address and `kind`.
 | Listener | Bind | Auth | Discovery |
 |----------|------|------|-----------|
 | USB | `127.0.0.1:8765` (`requiredLocalEndpoint`) | none: only processes on this Mac can reach it, and `adb reverse` delivers the tablet there | — |
-| Wi-Fi | `*:8766` | HMAC challenge; per-IP lockout after 5 failures in 60 s (30 s, doubling to 15 min); handshake timeouts count as failures | Bonjour `_inkbridge._tcp` |
+| Wi-Fi | `*:8766`, **TLS 1.2+** (`HostIdentity`) | device token, or the one-time Connect Device code (protocol v3, [ADR-007](../decisions/ADR-007-tls-pairing.md)); per-IP lockout after 5 failures in 60 s; handshake timeouts count as failures | Bonjour `_inkbridge._tcp`, TXT `id`, `v` |
 
 Each accepted `NWConnection` becomes a `PeerConnection`. It handles framing, decoding,
 the handshake state machine (`connecting → awaitingHello → ready → closed`), the
 5 s handshake timeout, 2 s pings, the 7 s idle timeout, and per-peer `ClockSync`.
-Wi-Fi can be switched off at runtime, which also drops Wi-Fi peers. Changing the
-pairing code drops Wi-Fi peers that were paired with the old one.
+Wi-Fi can be switched off at runtime, which also drops Wi-Fi peers. Forgetting a
+device drops its Wi-Fi link. `restartWifiListener()` re-registers the listener
+and Bonjour record after wake or a network change (`NetworkWatcher`).
 
 ## Choosing between transports
 

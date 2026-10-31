@@ -26,6 +26,14 @@ Driven with `adb shell input stylus swipe` / `input tap`, checked by tablet scre
 | 4, 5 | Layered export, native save panel | ✅ unit tests (bundle contents, transparency, JPEG, SVG culling, no-permission path, atomic replace); ⏳ manual run of the panel |
 | 6 | Toolbar resize, dock left/right, hide, reopen from menu bar | ⏳ manual check (builds; behaviour not unit-testable) |
 
+## Wireless and Android UI (v0.3)
+
+See [../testing/wifi-integration-tests.md](../testing/wifi-integration-tests.md) and
+[../testing/android-ui-tests.md](../testing/android-ui-tests.md).
+
+Totals: 87 Swift, 56 Kotlin core and 9 Robolectric UI tests. `scripts/e2e.sh` passes in both
+`usb` and `wifi` modes.
+
 ## Coverage map
 
 | Area | Swift tests | Kotlin tests |

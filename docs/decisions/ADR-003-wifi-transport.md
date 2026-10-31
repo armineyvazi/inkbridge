@@ -21,7 +21,7 @@ Research is in [`research/wifi-research.md`](../research/wifi-research.md).
   `HMAC-SHA256(normalized pairing code, nonce)`. The pairing code is generated on
   the Mac, shown in its menu and settings, and can be regenerated. Five failures in
   60 s from one IP lock that IP out (escalating); a global brake limits multi-host guessing.
-- **TLS is deferred to Phase 5**, using a self-signed Mac identity pinned by
+- **Superseded by [ADR-007](ADR-007-tls-pairing.md) (2026-10-31): TLS with a pinned certificate, one-time codes and device tokens are implemented.** Originally: TLS deferred to Phase 5, using a self-signed Mac identity pinned by
   fingerprint, delivered through a QR code. See
   [`architecture/security.md`](../architecture/security.md) for why PSK-TLS is not
   practical on Android.

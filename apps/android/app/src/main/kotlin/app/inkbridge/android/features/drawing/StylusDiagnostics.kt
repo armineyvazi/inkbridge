@@ -51,6 +51,11 @@ class StylusDiagnostics {
         buttonsSeen = 0
     }
 
+    companion object {
+        /** One instance for the app, so the Diagnostics screen shows what the canvas saw. */
+        val shared = StylusDiagnostics()
+    }
+
     private fun toolName(t: Int) = when (t) {
         MotionEvent.TOOL_TYPE_STYLUS -> "stylus"
         MotionEvent.TOOL_TYPE_ERASER -> "eraser"

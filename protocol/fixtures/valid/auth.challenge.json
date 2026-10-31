@@ -1,1 +1,1 @@
-{"version":2,"type":"auth.challenge","sequence":1,"timestamp_ns":1000,"nonce":"000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f","required":true}
+{"version":3,"type":"auth.challenge","sequence":1,"timestamp_ns":1000,"nonce":"000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f","required":true,"host_id":"6f1d3c2a-1b5e-4c3d-9a7f-2e8b0c4d5a61"}

@@ -33,7 +33,7 @@ Every message has these fields:
 
 | Field          | Type       | Rules |
 |----------------|------------|-------|
-| `version`      | integer    | Must equal `2`, otherwise the message is rejected (`unsupported protocol version`). v1 and v2 peers refuse each other. |
+| `version`      | integer    | Must equal `3`, otherwise the message is rejected (`unsupported protocol version`). v1, v2 and v3 peers refuse each other. |
 | `type`         | string     | See §3. Unknown types are a **recoverable** error: the receiver ignores them, which leaves room for additive changes. |
 | `sequence`     | integer ≥ 0 | Per-sender counter, strictly increasing. On the device it is scoped to `stream_id` (one per app process) and continues across reconnects. |
 | `timestamp_ns` | integer    | Send time on the sender's **monotonic** clock (Android `System.nanoTime()`, Mac `DispatchTime.uptimeNanoseconds`). Never wall-clock time. |
@@ -47,8 +47,9 @@ Direction: **D→H** means device to host, **H→D** host to device.
 
 | Type | Dir | Fields | Purpose |
 |------|-----|--------|---------|
-| `auth.challenge` | H→D | `nonce` (hex, 32 bytes), `required` (bool) | The first message on every connection. `required` is `false` on the loopback (USB) listener and `true` on the LAN listener. |
-| `device.hello` | D→H | `device_id`, `device_name`, `model`, `android_api`, `stream_id`, `surface_width_px`, `surface_height_px`, `capabilities{pressure,tilt,eraser,stylus_button}`, optional `auth` (hex) | Identifies the device. `auth = HMAC-SHA256(key = normalize(pairing code), msg = nonce bytes)`. |
+| `auth.challenge` | H→D | `nonce` (hex, 32 bytes), `required` (bool), `host_id` (string) | The first message on every connection. `required` is `false` on the loopback (USB) listener and `true` on the LAN (TLS) listener. `host_id` is the Mac's stable identity; a device never sends a token proof to a different `host_id`. |
+| `device.hello` | D→H | `device_id`, `device_name`, `model`, `android_api`, `stream_id`, `surface_width_px`, `surface_height_px`, `capabilities{pressure,tilt,eraser,stylus_button}`, optional `auth_mode` (`pair`\|`token`) and `auth` (hex) | Identifies the device. `auth = HMAC-SHA256(key, label ‖ 0x00 ‖ nonce ‖ fingerprint)`, where key/label are the normalized code / `inkbridge-v3-pair`, or the token bytes / `inkbridge-v3-token`, and fingerprint is SHA-256 of the TLS certificate the device saw (empty over USB). |
+| `pair.granted` | H→D | `host_id`, `host_name`, `token` (hex, 32 bytes), `proof` (hex) | After a correct `pair` proof, before `device.ready`. `proof` uses label `inkbridge-v3-host`; the device checks it before storing `token` and the certificate pin. |
 | `device.ready` | H→D | `host_name`, `session_id` | Handshake accepted; strokes may flow. |
 | `device.disconnect` | both | `reason` | Orderly close. |
 | `device.surface` | D→H | `surface_width_px`, `surface_height_px` | The drawing surface changed size, e.g. on rotation. |
@@ -113,7 +114,8 @@ See [`diagrams/connection-flow.mmd`](../diagrams/connection-flow.mmd).
 
 1. The device connects. The host immediately sends `auth.challenge`.
 2. The device sends `device.hello`, adding `auth` if `required`.
-3. The host replies `device.ready`, or `error{auth_failed}` and closes.
+3. For a `pair` proof the host sends `pair.granted`. Then `device.ready{host_name, session_id, host_id, resume_sequence}`, or an `error` and closes.
+4. `resume_sequence` is the highest sequence the host already holds for this `stream_id`. The device re-sends (with new sequence numbers) any document message it wrote after that on a link that died, but only when `host_id` and `session_id` match the previous connection.
 4. Anything other than `device.hello` before `ready` gets
    `error{handshake_required}` and a close. With no hello within 5 s the host sends
    `error{handshake_timeout}` and closes.
@@ -164,6 +166,8 @@ The host owns the document; the device keeps a mirror for display
 
 | `code` | Sent by | Effect |
 |--------|---------|--------|
+| `auth_required` / `not_paired` | host | Close. The device drops its pairing and asks the user to pair again. |
+| `pairing_closed` | host | Close. No Connect Device window is open, or its code expired or was voided. |
 | `auth_failed` | host | Close. The device stops retrying (`ClientState.Failed`). Five failures within 60 s from one IP lock that IP out of the LAN listener for 30 s, doubling per repeat (max 15 min); Wi-Fi handshake timeouts count as failures. |
 | `handshake_required`, `handshake_timeout` | host | Close. |
 | `bad_frame` | host | Close (framing lost). |
@@ -188,8 +192,9 @@ The host owns the document; the device keeps a mirror for display
 
 Additive changes (new optional fields, new message types) keep the version. Receivers
 ignore unknown fields and unknown types. Anything that changes the meaning of an
-existing field bumps `version`. That is why v2 exists: point coordinates changed
-meaning, from normalized to canvas px. Peers refuse a mismatched version with an
+existing field bumps `version`. That is why v2 exists (point coordinates changed
+meaning, from normalized to canvas px) and v3 (proofs are bound to the TLS certificate,
+and `device.ready` gained `resume_sequence`). Peers refuse a mismatched version with an
 error, so it is visible instead of silently misdrawn.
 
 ## 11. Future: binary encoding

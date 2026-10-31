@@ -38,7 +38,8 @@ extension InkCoordinator: ToolbarActions {
 
     func openSettings() {
         if settingsWindow == nil {
-            let view = SettingsView(model: model, regenerateCode: { [weak self] in self?.regeneratePairingCode() },
+            let view = SettingsView(model: model, connectDevice: { [weak self] in self?.openConnectDevice() },
+                                    forget: { [weak self] in self?.forget($0) },
                                     exportDiagnostics: { [weak self] in self?.exportDiagnostics() })
             let window = NSWindow(contentViewController: NSHostingController(rootView: view))
             window.title = "InkBridge Settings"
@@ -52,9 +53,14 @@ extension InkCoordinator: ToolbarActions {
         settingsWindow?.makeKeyAndOrderFront(nil)
     }
 
-    func regeneratePairingCode() {
-        model.pairingCode = PairingAuth.generateCode()
-        server.setPairingCode(model.pairingCode)
+    /// Opens Connect Device with a fresh short-lived code.
+    func openConnectDevice() {
+        connectDevice.show()
+    }
+
+    func forget(_ device: PairedDevice) {
+        server.forget(deviceID: device.deviceID)
+        model.pairedDevices = pairedDevices.all.filter { $0.deviceID != device.deviceID }
     }
 
     func exportDiagnostics() {
@@ -83,6 +89,7 @@ extension InkCoordinator: ToolbarActions {
         keys.register(kVK_ANSI_T) { [weak self] in self?.toggleToolbar() }
         keys.register(kVK_ANSI_F) { [weak self] in self?.fitAll() }
         keys.register(kVK_ANSI_0) { [weak self] in self?.homeView() }
+        keys.register(kVK_ANSI_K) { [weak self] in self?.openConnectDevice() }
     }
 
     // MARK: Persistence

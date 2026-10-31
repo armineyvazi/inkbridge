@@ -275,7 +275,10 @@ private struct StatusBadge: View {
     }
 
     private var subtitle: String {
-        guard model.connection.isConnected else { return model.wifiEnabled ? "code \(model.pairingCode)" : "USB only" }
+        guard model.connection.isConnected else {
+            if model.pairedDevices.isEmpty { return "⌃⌥K to connect" }
+            return model.wifiEnabled ? "Wi-Fi ready" : "USB only"
+        }
         var parts: [String] = []
         if let rtt = model.rttMs { parts.append(String(format: "rtt %.0f ms", rtt)) }
         if let lat = model.inputLatencyMs { parts.append(String(format: "ink %.0f ms", lat)) }

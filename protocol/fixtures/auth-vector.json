@@ -2,5 +2,9 @@
   "pairing_code": "K7QW-M3XP",
   "normalized_key": "K7QWM3XP",
   "nonce_hex": "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f",
-  "expected_response_hex": "ffeb7f29884dec7b6c86d90e51c1d83b0ee11b041c6f814665ae78212c886834"
+  "fingerprint_hex": "a0a1a2a3a4a5a6a7a8a9aaabacadaeafb0b1b2b3b4b5b6b7b8b9babbbcbdbebf",
+  "pair_proof_hex": "8c6d6260c293f43299303ffe895809f43e65a5b831fca3df2bb282c0eb00007c",
+  "host_proof_hex": "1a5c4f88448c7a9c79aed836a31a6f584c16f02fc7ff66c12dda6c75397a2c7c",
+  "token_hex": "5f5f5f5f5f5f5f5f5f5f5f5f5f5f5f5fa3a3a3a3a3a3a3a3a3a3a3a3a3a3a3a3",
+  "token_proof_hex": "454f41a7091f97bb93aa3f28e00c2c8133cd6ddbec2096405181d9bf0ffbaee8"
 }

@@ -32,6 +32,8 @@ final class PeerConnection {
     private var lastInbound = monotonicNowNs()
     private var timers: [DispatchSourceTimer] = []
     private var badMessages = 0
+    /// Set once the device has said hello; used to find its connections.
+    private(set) var deviceID: String?
 
     init(server: InkServer, connection: NWConnection, kind: TransportKind, remoteHost: String) {
         self.server = server
@@ -74,7 +76,7 @@ final class PeerConnection {
         let nonce = PairingAuth.generateNonce()
         state = .awaitingHello(nonce: nonce, authRequired: authRequired)
         // The host always speaks first so the device knows whether to authenticate.
-        send(.authChallenge(nonce: [UInt8](nonce).hexString, required: authRequired))
+        send(.authChallenge(nonce: nonce.hexString, required: authRequired, hostID: server.config.hostID))
         schedule(after: server.config.handshakeTimeout) { [weak self] in
             guard let self, case let .awaitingHello(_, authRequired) = self.state else { return }
             // On the LAN a stalled handshake is an attempt that never proved the
@@ -85,23 +87,71 @@ final class PeerConnection {
     }
 
     private func handleHello(_ hello: DeviceHello, nonce: Data, authRequired: Bool) {
+        deviceID = hello.deviceID
+        var granted: PairedDevice?
         if authRequired {
-            guard let response = hello.auth,
-                  PairingAuth.verify(response: response, code: server.pairingCode, nonce: nonce)
-            else {
-                server.recordAuthFailure(host: remoteHost)
-                server.log.notice("pairing failed for \(hello.deviceName, privacy: .public)")
-                reject(code: "auth_failed", "pairing code mismatch")
+            switch authenticate(hello, nonce: nonce) {
+            case .success(let device): granted = device
+            case .failure(let failure):
+                server.log.notice("auth failed for \(hello.deviceName, privacy: .public): \(failure.code, privacy: .public)")
+                reject(code: failure.code, failure.message)
                 return
             }
         }
         let info = PeerInfo(id: id, kind: kind, hello: hello, remote: String(describing: connection.endpoint))
         state = .ready(info)
         if authRequired { server.recordAuthSuccess(host: remoteHost) }
-        send(.deviceReady(hostName: server.config.serviceName, sessionID: server.config.sessionID))
+        let resume = server.highWater(for: hello.streamID)
+        send(.deviceReady(hostName: server.config.serviceName, sessionID: server.config.sessionID, hostID: server.config.hostID,
+                          resumeSequence: resume))
         server.log.info("device ready: \(hello.deviceName, privacy: .public) via \(self.kind.rawValue, privacy: .public)")
+        if let granted { server.pairingSucceeded(granted) }
         server.peerAuthenticated(self, info: info)
         startKeepAlive()
+    }
+
+    struct AuthFailure: Error {
+        var code: String
+        var message: String
+    }
+
+    /// Checks a LAN device's proof. On a successful `.pair` it also issues the
+    /// token and sends `pair.granted` (before `device.ready`).
+    private func authenticate(_ hello: DeviceHello, nonce: Data) -> Result<PairedDevice?, AuthFailure> {
+        let fingerprint = server.fingerprint(for: kind)
+        guard let proof = hello.auth, let mode = hello.authMode else {
+            server.recordAuthFailure(host: remoteHost)
+            return .failure(AuthFailure(code: "auth_required", message: "pair this tablet from Connect Device on the Mac"))
+        }
+        let store = server.config.pairedDevices
+        switch mode {
+        case .token:
+            guard let token = store.token(for: hello.deviceID) else {
+                // Not a guess against a secret, so not throttled: the Mac forgot this device.
+                return .failure(AuthFailure(code: "not_paired", message: "this Mac no longer knows this tablet; pair again"))
+            }
+            guard PairingAuth.verifyToken(proof, token: token, nonce: nonce, fingerprint: fingerprint) else {
+                server.recordAuthFailure(host: remoteHost)
+                return .failure(AuthFailure(code: "auth_failed", message: "device token rejected"))
+            }
+            store.touch(hello.deviceID, name: hello.deviceName)
+            return .success(nil)
+        case .pair:
+            guard let code = server.validPairingCode else {
+                server.recordAuthFailure(host: remoteHost)
+                return .failure(AuthFailure(code: "pairing_closed", message: "open Connect Device on the Mac to get a new code"))
+            }
+            guard PairingAuth.verifyPair(proof, code: code, nonce: nonce, fingerprint: fingerprint) else {
+                server.recordAuthFailure(host: remoteHost)
+                server.pairingFailed()
+                return .failure(AuthFailure(code: "auth_failed", message: "wrong pairing code"))
+            }
+            let token = store.add(deviceID: hello.deviceID, name: hello.deviceName, model: hello.model)
+            send(.pairGranted(hostID: server.config.hostID, hostName: server.config.serviceName, token: token.hexString,
+                              proof: PairingAuth.hostProof(code: code, nonce: nonce, fingerprint: fingerprint)))
+            let device = store.all.first { $0.deviceID == hello.deviceID }
+            return .success(device)
+        }
     }
 
     private func reject(code: String, _ message: String) {
@@ -192,6 +242,7 @@ final class PeerConnection {
                 reject(code: "handshake_required", "expected device.hello")
             }
         case let .ready(info):
+            server.noteSequence(message.sequence, stream: info.hello.streamID)
             switch message.payload {
             case let .ping(pingID):
                 send(.pong(pingID: pingID, echoTimestampNs: message.timestampNs))

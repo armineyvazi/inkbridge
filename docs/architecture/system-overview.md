@@ -42,11 +42,11 @@ The full diagram is in [`diagrams/system-architecture.mmd`](../diagrams/system-a
 |-------|---------|-------|-------------|
 | Input | `AndroidMotionEventSource`, `StrokeProcessor`, `CoordinateNormalizer` | — | MotionEvents, never sockets |
 | Protocol | `MessageCodec`, `Framing`, `PairingAuth` | `MessageCodec`, `FrameCodec`, `PairingAuth` | bytes ↔ typed messages |
-| Transport | `TcpTransport` (`AdbReverseTransport`, `WifiTcpTransport`) | `InkServer`, `PeerConnection` | sockets and frames, never strokes |
+| Transport | `TcpTransport` (`AdbReverseTransport`, `TlsTransport`) | `InkServer`, `PeerConnection` | sockets and frames, never strokes |
 | Session | `InkBridgeClient` | `PeerArbiter`, `StrokeIngestor`, `ClockSync` | which device is active, ordering, latency |
 | Drawing | (local preview only) | `StrokeStore`, `StrokeRenderer`, `Smoothing`, `CoordinateMapper` | strokes, never transports |
-| Presentation | `MainActivity`, `DrawingSurfaceView` | `OverlayWindow`, `OverlayView`, `ToolbarView`, `MenuBarController` | UI |
-| Storage | `ConnectionSettings` (prefs) | `SessionArchive` | files |
+| Presentation | `DashboardActivity`, `ConnectActivity`, `CanvasActivity`, `SettingsActivity`, `DiagnosticsActivity` | `OverlayWindow`, `OverlayView`, `ToolbarView`, `MenuBarController` | UI |
+| Storage | `AppSettings`, `PairingStore` (prefs) | `SessionArchive` | files |
 
 The separation the brief requires holds at these boundaries:
 

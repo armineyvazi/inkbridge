@@ -7,6 +7,11 @@ import InkBridgeCore
 //
 //   inkbridge-probe [--seconds N] [--code XXXX-XXXX] [--no-wifi]
 //                   [--usb-port 8765] [--wifi-port 8766] [--expect-strokes N]
+//                   [--expect-pairings N] [--identity DIR]
+//
+// Wi-Fi is TLS with a throwaway identity, and a Connect Device window with
+// --code stays open for the whole run, so a simulator can pair and then
+// reconnect with its token.
 //
 // Exit status is non-zero if --expect-strokes is given and not met, so the
 // probe can gate scripts/e2e.sh.
@@ -18,6 +23,10 @@ struct Options {
     var usbPort: UInt16 = 8765
     var wifiPort: UInt16 = 8766
     var expectStrokes: Int?
+    var expectPairings: Int?
+    /// Keep the TLS identity here instead of a throwaway directory, so a
+    /// tablet's certificate pin survives probe restarts.
+    var identityDir: String?
 
     init(_ args: [String]) {
         var it = args.dropFirst().makeIterator()
@@ -29,6 +38,8 @@ struct Options {
             case "--usb-port": usbPort = UInt16(it.next() ?? "") ?? usbPort
             case "--wifi-port": wifiPort = UInt16(it.next() ?? "") ?? wifiPort
             case "--expect-strokes": expectStrokes = Int(it.next() ?? "")
+            case "--expect-pairings": expectPairings = Int(it.next() ?? "")
+            case "--identity": identityDir = it.next()
             default:
                 FileHandle.standardError.write(Data("unknown argument \(a)\n".utf8))
                 exit(2)
@@ -92,6 +103,14 @@ final class Probe: InkServerDelegate {
         print("listener \(listener.rawValue): \(state)")
     }
 
+    var pairings = 0
+    func inkServer(_ s: InkServer, didPair device: PairedDevice) {
+        pairings += 1
+        print("paired: \(device.name)")
+        // Keep the window open so later runs in the same probe can pair too.
+        s.openPairing(code: options.code)
+    }
+
     func report() {
         func f(_ v: Double?) -> String { v.map { String(format: "%.2f", $0) } ?? "n/a" }
         print("---- probe report ----")
@@ -108,7 +127,18 @@ final class Probe: InkServerDelegate {
 }
 
 let options = Options(CommandLine.arguments)
-var config = InkServer.Config(serviceName: "InkBridge Probe", pairingCode: options.code, sessionID: "probe-session")
+let identityDir = options.identityDir.map { URL(fileURLWithPath: $0) }
+    ?? FileManager.default.temporaryDirectory.appendingPathComponent("inkbridge-probe-\(getpid())")
+let identity: HostIdentity
+do {
+    identity = try HostIdentity.loadOrCreate(in: identityDir, commonName: "InkBridge Probe")
+} catch {
+    print("FAIL: TLS identity: \(error)")
+    exit(1)
+}
+var config = InkServer.Config(serviceName: "InkBridge Probe", sessionID: "probe-session", identity: identity,
+                              pairedDevices: PairedDevices(url: nil))
+config.pairingDuration = options.seconds + 5
 config.usbPort = options.usbPort
 config.wifiPort = options.wifiPort
 config.wifiEnabled = options.wifi
@@ -119,12 +149,18 @@ let probe = Probe()
 let server = InkServer(config: config)
 server.delegate = probe
 server.start()
-print("probe running for \(Int(options.seconds))s; pairing code \(options.code)")
+server.openPairing(code: options.code)
+print("probe running for \(Int(options.seconds))s; pairing code \(options.code); tls \(identity.shortFingerprint)")
 setvbuf(stdout, nil, _IOLBF, 0)
 
 DispatchQueue.main.asyncAfter(deadline: .now() + options.seconds) {
     probe.report()
     server.stop()
+    if options.identityDir == nil { try? FileManager.default.removeItem(at: identityDir) }
+    if let want = options.expectPairings, probe.pairings < want {
+        print("FAIL: expected at least \(want) pairings, got \(probe.pairings)")
+        exit(1)
+    }
     if let want = options.expectStrokes, probe.store.strokes.count < want {
         print("FAIL: expected at least \(want) strokes, got \(probe.store.strokes.count)")
         exit(1)

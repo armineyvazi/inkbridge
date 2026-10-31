@@ -64,8 +64,8 @@ public enum MessageCodec {
 
     private static func fields(of payload: Payload) -> [String: Any] {
         switch payload {
-        case let .authChallenge(nonce, required):
-            return ["nonce": nonce, "required": required]
+        case let .authChallenge(nonce, required, hostID):
+            return ["nonce": nonce, "required": required, "host_id": hostID]
         case let .deviceHello(h):
             var f: [String: Any] = [
                 "device_id": h.deviceID, "device_name": h.deviceName, "model": h.model,
@@ -77,9 +77,12 @@ public enum MessageCodec {
                 ],
             ]
             if let auth = h.auth { f["auth"] = auth }
+            if let mode = h.authMode { f["auth_mode"] = mode.rawValue }
             return f
-        case let .deviceReady(hostName, sessionID):
-            return ["host_name": hostName, "session_id": sessionID]
+        case let .pairGranted(hostID, hostName, token, proof):
+            return ["host_id": hostID, "host_name": hostName, "token": token, "proof": proof]
+        case let .deviceReady(hostName, sessionID, hostID, resume):
+            return ["host_name": hostName, "session_id": sessionID, "host_id": hostID, "resume_sequence": resume]
         case let .deviceDisconnect(reason):
             return ["reason": reason]
         case let .deviceSurface(w, h):
@@ -142,11 +145,15 @@ public enum MessageCodec {
     private static func decodePayload(type: String, _ f: Fields) throws -> Payload {
         switch type {
         case "auth.challenge":
-            return .authChallenge(nonce: try f.hex("nonce"), required: try f.bool("required"))
+            return .authChallenge(nonce: try f.hex("nonce"), required: try f.bool("required"), hostID: try f.string("host_id"))
         case "device.hello":
             return .deviceHello(try decodeHello(f))
         case "device.ready":
-            return .deviceReady(hostName: try f.string("host_name"), sessionID: try f.string("session_id"))
+            return .deviceReady(hostName: try f.string("host_name"), sessionID: try f.string("session_id"),
+                                hostID: try f.string("host_id"), resumeSequence: try f.uint64("resume_sequence"))
+        case "pair.granted":
+            return .pairGranted(hostID: try f.string("host_id"), hostName: try f.string("host_name"),
+                                token: try f.hex("token"), proof: try f.hex("proof"))
         case "device.disconnect":
             return .deviceDisconnect(reason: try f.string("reason"))
         case "device.surface":
@@ -220,6 +227,10 @@ public enum MessageCodec {
                 eraser: try caps.bool("eraser"),
                 stylusButton: try caps.bool("stylus_button")
             ),
+            authMode: try f.optionalString("auth_mode").map { raw in
+                guard let mode = AuthMode(rawValue: raw) else { throw ProtocolError.invalidField("auth_mode") }
+                return mode
+            },
             auth: try f.optionalHex("auth")
         )
     }

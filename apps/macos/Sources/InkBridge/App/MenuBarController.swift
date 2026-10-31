@@ -44,16 +44,19 @@ final class MenuBarController: NSObject, NSMenuDelegate {
     func menuNeedsUpdate(_ menu: NSMenu) {
         let m = coordinator.model
         menu.removeAllItems()
-        let status = m.connection.isConnected
+        var status = m.connection.isConnected
             ? "Connected: \(m.connection.deviceName ?? "BOOX") via \(m.connection.transport == .usb ? "USB" : "Wi-Fi")"
-            : "Waiting for BOOX…"
+            : (m.pairedDevices.isEmpty ? "No tablet paired yet" : "Waiting for your BOOX…")
+        if m.connection.isConnected, let rtt = m.rttMs { status += String(format: " · %.0f ms", rtt) }
         menu.addItem(withTitle: status, action: nil, keyEquivalent: "").isEnabled = false
-        if m.wifiEnabled {
-            menu.addItem(withTitle: "Wi-Fi pairing code: \(m.pairingCode)", action: nil, keyEquivalent: "").isEnabled = false
+        if !m.connection.isConnected && m.wifiEnabled && !m.connection.wifiListening {
+            menu.addItem(withTitle: "Wi-Fi listener is not running", action: nil, keyEquivalent: "").isEnabled = false
         }
         if let message = m.statusMessage {
             menu.addItem(withTitle: message, action: nil, keyEquivalent: "").isEnabled = false
         }
+        menu.addItem(.separator())
+        add(menu, "Connect Device…", #selector(connectDevice), key: "k")
         menu.addItem(.separator())
         add(menu, coordinator.isToolbarVisible ? "Hide Toolbar" : "Show Toolbar", #selector(toggleToolbar))
         menu.addItem(toolbarSubmenu("Toolbar Size", ToolbarSize.allCases.map { ($0.title, $0.rawValue, $0 == m.toolbarSize) }, #selector(setSize)))
@@ -102,6 +105,7 @@ final class MenuBarController: NSObject, NSMenuDelegate {
         coordinator.showToolbar()
     }
 
+    @objc private func connectDevice() { coordinator.openConnectDevice() }
     @objc private func toggleToolbar() { coordinator.toggleToolbar() }
     @objc private func toggleOverlay() { coordinator.toggleOverlay() }
     @objc private func fitAll() { coordinator.fitAll() }

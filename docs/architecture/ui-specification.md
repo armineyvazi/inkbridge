@@ -15,7 +15,7 @@ annotated, and native on each platform.
 
 | Group | Items |
 |---|---|
-| Status | Connected: *device* via USB/Wi-Fi · Wi-Fi pairing code · last status message |
+| Status | Connected: *device* via USB/Wi-Fi · latency · Connect Device… (⌃⌥K) · last status message |
 | Toolbar | Show/Hide Toolbar · Toolbar Size ▸ Expanded/Compact/Minimal · Toolbar Position ▸ Bottom/Top/Left/Right/Where I drag it |
 | View | Show/Hide Ink · Fit All Ink · Home View |
 | Files | Save… (⌘S in the menu) · Open Autosave Folder |

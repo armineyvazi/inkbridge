@@ -1,1 +1,1 @@
-{"version":2,"type":"device.ready","sequence":2,"timestamp_ns":3000,"host_name":"Armin's MacBook Pro","session_id":"session-20261031-120000"}
+{"version":3,"type":"device.ready","sequence":2,"timestamp_ns":3000,"host_name":"Armin's MacBook Pro","session_id":"session-20261031-120000","host_id":"6f1d3c2a-1b5e-4c3d-9a7f-2e8b0c4d5a61","resume_sequence":0}

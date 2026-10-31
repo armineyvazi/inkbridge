@@ -20,6 +20,8 @@ class StrokeProcessor(
     /** Prefix that makes stroke IDs unique across app processes. */
     private val streamTag: String,
     var acceptFinger: Boolean = false,
+    /** Read on every sample; a settings change applies to the next sample. */
+    @Volatile var pressure: PressureResponse = PressureResponse.NORMAL,
 ) {
     private var counter = 0L
     private var activeId: String? = null
@@ -80,7 +82,7 @@ class StrokeProcessor(
         return InkPoint(
             x = round2(v.toCanvasX(s.x)),
             y = round2(v.toCanvasY(s.y)),
-            p = round4(s.pressure.toDouble().coerceIn(0.0, 1.0)),
+            p = round4(pressure.apply(s.pressure.toDouble().coerceIn(0.0, 1.0))),
             t = s.timeNs,
         )
     }
@@ -88,8 +90,20 @@ class StrokeProcessor(
     companion object {
         const val MAX_BATCH = 256
 
+
         // 0.01 canvas px is far below what a digitizer resolves; rounding keeps messages short.
         fun round2(v: Double): Double = (v * 100).roundToLong() / 100.0
         fun round4(v: Double): Double = (v * 10_000).roundToLong() / 10_000.0
     }
+}
+
+/**
+ * How pen pressure maps to line width. A power curve keeps 0 and 1 fixed:
+ * SOFT reaches full width with a lighter hand, FIRM needs more force, OFF
+ * draws every line at full width (as if pressure were always 1).
+ */
+enum class PressureResponse(private val exponent: Double?) {
+    OFF(null), SOFT(0.6), NORMAL(1.0), FIRM(1.6);
+
+    fun apply(p: Double): Double = exponent?.let { Math.pow(p, it) } ?: 1.0
 }

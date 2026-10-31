@@ -17,15 +17,27 @@ public protocol InkServerDelegate: AnyObject {
     func inkServer(_ server: InkServer, peer: PeerInfo, didUpdateClock clock: ClockSync)
     func inkServer(_ server: InkServer, didDisconnect peer: PeerInfo, reason: String)
     func inkServer(_ server: InkServer, listener: TransportKind, didChangeState state: InkServer.ListenerState)
+    /// A device proved the Connect Device code and now has a token.
+    func inkServer(_ server: InkServer, didPair device: PairedDevice)
+    /// The Connect Device ticket was used up, expired or voided; nil means none is open.
+    func inkServer(_ server: InkServer, pairingTicketChanged ticket: PairingTicket?)
+}
+
+public extension InkServerDelegate {
+    func inkServer(_ server: InkServer, didPair device: PairedDevice) {}
+    func inkServer(_ server: InkServer, pairingTicketChanged ticket: PairingTicket?) {}
 }
 
 /// Accepts device connections over USB (loopback) and Wi-Fi (LAN).
 ///
 /// Both listeners speak the same framed protocol; the only difference is
 /// trust. The loopback listener is reachable only from this Mac (which is
-/// where `adb reverse` delivers the tablet's traffic), so it does not ask for
-/// the pairing code. The LAN listener is reachable by anything on the network,
-/// so every connection must answer a pairing challenge before it can draw.
+/// where `adb reverse` delivers the tablet's traffic), so it is plain TCP and
+/// asks for no proof. The LAN listener is reachable by anything on the
+/// network: it is TLS with the Mac's pinned self-signed certificate
+/// (HostIdentity), and every connection must prove either its device token
+/// or, while a Connect Device window is open, the short-lived pairing code
+/// (protocol v3, docs/architecture/wireless-connection.md).
 ///
 /// All socket work happens on one private serial queue.
 public final class InkServer {
@@ -34,8 +46,14 @@ public final class InkServer {
         public var wifiPort: UInt16 = 8766
         public var wifiEnabled = true
         public var serviceName: String
-        public var pairingCode: String
         public var sessionID: String
+        /// Stable ID sent in `auth.challenge` so devices know which Mac they reached.
+        public var hostID: String
+        /// TLS identity for the LAN listener. Without one Wi-Fi stays off.
+        public var identity: HostIdentity?
+        public var pairedDevices: PairedDevices
+        /// How long a Connect Device code stays valid.
+        public var pairingDuration: TimeInterval = 300
         public var handshakeTimeout: TimeInterval = 5
         public var pingInterval: TimeInterval = 2
         /// A peer that sends nothing for this long is presumed gone.
@@ -46,10 +64,13 @@ public final class InkServer {
         /// idle LAN sockets can never block the USB tablet from connecting.
         public var maxPendingPerTransport = 4
 
-        public init(serviceName: String, pairingCode: String, sessionID: String) {
+        public init(serviceName: String, sessionID: String, identity: HostIdentity?,
+                    pairedDevices: PairedDevices, hostID: String? = nil) {
             self.serviceName = serviceName
-            self.pairingCode = pairingCode
             self.sessionID = sessionID
+            self.identity = identity
+            self.pairedDevices = pairedDevices
+            self.hostID = hostID ?? identity?.hostID ?? "local-host"
         }
     }
 
@@ -73,6 +94,10 @@ public final class InkServer {
     var maxRestartDelay: TimeInterval = 10
     private var peers: [UUID: PeerConnection] = [:]
     private var throttle = AuthThrottle()
+    /// Highest sequence received per device stream, across connections.
+    private var streamHighWater: [String: UInt64] = [:]
+    private var ticket: PairingTicket?
+    private var ticketTimer: DispatchSourceTimer?
     let log = Logger(subsystem: "app.inkbridge", category: "server")
 
     public init(config: Config, delegateQueue: DispatchQueue = .main) {
@@ -99,11 +124,75 @@ public final class InkServer {
         }
     }
 
-    /// Changing the pairing code disconnects Wi-Fi peers that used the old one.
-    public func setPairingCode(_ code: String) {
+    // MARK: Pairing
+
+    /// Opens (or renews) the Connect Device window: a fresh single-use code,
+    /// valid for `pairingDuration`. Already-paired devices are unaffected.
+    @discardableResult
+    public func openPairing(code: String = PairingAuth.generateCode()) -> PairingTicket {
+        queue.sync {
+            let t = PairingTicket(code: code, expiresAt: Date().addingTimeInterval(config.pairingDuration))
+            setTicket(t)
+            ticketTimer?.cancel()
+            let timer = DispatchSource.makeTimerSource(queue: queue)
+            timer.schedule(deadline: .now() + config.pairingDuration)
+            timer.setEventHandler { [weak self] in
+                guard let self, self.ticket?.code == t.code else { return }
+                self.setTicket(nil)
+            }
+            timer.resume()
+            ticketTimer = timer
+            return t
+        }
+    }
+
+    public func closePairing() {
         queue.async { [self] in
-            config.pairingCode = code
-            peers.values.filter { $0.kind == .wifi }.forEach { $0.close(reason: "pairing code changed", notifyPeer: true) }
+            ticketTimer?.cancel()
+            setTicket(nil)
+        }
+    }
+
+    /// Removes a device's token and drops its Wi-Fi connection; it must pair again.
+    public func forget(deviceID: String) {
+        queue.async { [self] in
+            config.pairedDevices.remove(deviceID)
+            peers.values.filter { $0.kind == .wifi && $0.deviceID == deviceID }
+                .forEach { $0.close(reason: "device forgotten on the Mac", notifyPeer: true) }
+        }
+    }
+
+    private func setTicket(_ t: PairingTicket?) {
+        ticket = t
+        notify { $0.inkServer(self, pairingTicketChanged: t) }
+    }
+
+    /// The open ticket's code, or nil if none is open or it has expired.
+    var validPairingCode: String? {
+        guard let t = ticket, t.isValid() else { return nil }
+        return t.code
+    }
+
+    func pairingFailed() {
+        guard var t = ticket else { return }
+        t.failures += 1
+        setTicket(t.isValid() ? t : nil)
+    }
+
+    func pairingSucceeded(_ device: PairedDevice) {
+        ticketTimer?.cancel()
+        setTicket(nil)  // single use
+        notify { $0.inkServer(self, didPair: device) }
+    }
+
+    /// Restarts the LAN listener, e.g. after wake or a network change, so the
+    /// Bonjour advertisement is re-registered on the current interfaces.
+    public func restartWifiListener() {
+        queue.async { [self] in
+            guard running, config.wifiEnabled else { return }
+            listeners.removeValue(forKey: .wifi)?.cancel()
+            restartAttempts[.wifi] = 0
+            startListener(.wifi)
         }
     }
 
@@ -133,10 +222,22 @@ public final class InkServer {
     // MARK: Listeners
 
     private func startListener(_ kind: TransportKind) {
-        let params = NWParameters.tcp
-        if let tcp = params.defaultProtocolStack.transportProtocol as? NWProtocolTCP.Options {
-            // Stroke messages are tiny and latency-critical; never wait to coalesce.
-            tcp.noDelay = true
+        let tcp = NWProtocolTCP.Options()
+        // Stroke messages are tiny and latency-critical; never wait to coalesce.
+        tcp.noDelay = true
+        let params: NWParameters
+        if kind == .wifi {
+            guard let identity = config.identity else {
+                notify { $0.inkServer(self, listener: kind, didChangeState: .failed("no TLS identity")) }
+                return
+            }
+            let tls = NWProtocolTLS.Options()
+            let sec = tls.securityProtocolOptions
+            sec_protocol_options_set_local_identity(sec, sec_identity_create(identity.secIdentity)!)
+            sec_protocol_options_set_min_tls_protocol_version(sec, .TLSv12)
+            params = NWParameters(tls: tls, tcp: tcp)
+        } else {
+            params = NWParameters(tls: nil, tcp: tcp)
         }
         params.allowLocalEndpointReuse = true
         let port = kind == .usb ? config.usbPort : config.wifiPort
@@ -148,7 +249,11 @@ public final class InkServer {
                 listener = try NWListener(using: params)
             } else {
                 listener = try NWListener(using: params, on: NWEndpoint.Port(rawValue: port)!)
-                listener.service = NWListener.Service(name: config.serviceName, type: Self.bonjourType)
+                // TXT lets a tablet recognise its paired Mac after the IP changes.
+                var txt = NWTXTRecord()
+                txt["id"] = config.hostID
+                txt["v"] = String(inkProtocolVersion)
+                listener.service = NWListener.Service(name: config.serviceName, type: Self.bonjourType, domain: nil, txtRecord: txt)
             }
         } catch {
             notify { $0.inkServer(self, listener: kind, didChangeState: .failed(error.localizedDescription)) }
@@ -209,7 +314,20 @@ public final class InkServer {
 
     // MARK: Peer callbacks (on `queue`)
 
-    var pairingCode: String { config.pairingCode }
+    func highWater(for stream: String) -> UInt64 { streamHighWater[stream] ?? 0 }
+
+    func noteSequence(_ sequence: UInt64, stream: String) {
+        if streamHighWater[stream] == nil && streamHighWater.count >= 64 {
+            // Streams are per app process; old ones never come back. Keep the table small.
+            streamHighWater.removeAll()
+        }
+        streamHighWater[stream] = max(streamHighWater[stream] ?? 0, sequence)
+    }
+
+    /// What a device on `kind` must prove over: the certificate it was shown.
+    func fingerprint(for kind: TransportKind) -> Data {
+        kind == .wifi ? (config.identity?.fingerprint ?? Data()) : Data()
+    }
 
     func peerAuthenticated(_ peer: PeerConnection, info: PeerInfo) {
         notify { $0.inkServer(self, didConnect: info) }

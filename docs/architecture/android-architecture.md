@@ -8,17 +8,23 @@ apps/android/
 │       ├── canvas/     Viewport, Bounds, CanvasDocument (the tablet's mirror)
 │       ├── input/      StylusEvent, StylusInputSource, StrokeProcessor, EventRateMeter
 │       ├── transport/  Transport, TcpTransport, AdbReverseTransport,
-│       │               WifiTcpTransport, ReconnectionPolicy
-│       └── client/     InkBridgeClient, ClientState, DeviceDescriptor
+│       │               TlsTransport (pinning), ReconnectionPolicy
+│       ├── client/     InkBridgeClient, ClientState, Credentials, FailureKind
+│       └── connection/ ConnectionStatus (UI state model), PairingLink (QR)
 ├── app/         the Android application
 │   └── app/inkbridge/android/
-│       ├── MainActivity.kt
+│       ├── InkBridgeApp.kt  Application: owns ConnectionManager across screens
+│       ├── core/       NetworkMonitor
+│       ├── design/     Ink (tokens + components), InkActivity, EInk
 │       ├── input/      AndroidMotionEventSource, StylusCapabilityProbe
 │       └── features/
-│           ├── canvas/      CanvasView (gestures), CanvasRenderer (render thread)
-│           ├── drawing/     StylusDiagnostics
-│           ├── connection/  ConnectionSettings, BonjourDiscovery
-│           └── settings/    SettingsDialog
+│           ├── dashboard/   DashboardActivity (launcher)
+│           ├── connect/     ConnectActivity (discovery list, code, manual, USB, QR link)
+│           ├── canvas/      CanvasActivity, CanvasView (gestures), CanvasRenderer (render thread)
+│           ├── connection/  ConnectionManager, BonjourDiscovery, PairingStore
+│           ├── settings/    SettingsActivity, AppSettings
+│           ├── diagnostics/ DiagnosticsActivity
+│           └── drawing/     StylusDiagnostics
 └── simulator/   JVM "virtual tablet" using :core
 ```
 
@@ -32,7 +38,7 @@ in one direction only (`client → transport, protocol, input`).
 
 ## Input pipeline
 
-`DrawingSurfaceView.onTouchEvent` → `AndroidMotionEventSource.onMotionEvent` →
+`CanvasView.onTouchEvent` → `AndroidMotionEventSource.onMotionEvent` →
 `StrokeProcessor.process` → `InkBridgeClient.submit`.
 
 - **Historical samples.** `AndroidMotionEventSource.samples()` returns every
@@ -120,3 +126,19 @@ once a second, because e-ink cannot redraw text at input rate. The canvas is a
 
 `android.util.Log`, tag `InkBridge`. The device and digitizer report is logged on
 launch (`adb logcat -s InkBridge`). Stroke contents are never logged.
+
+## Screens and the connection layer (v0.3)
+
+The UI was redesigned for e-ink. See [design/](../design/android-ui-guidelines.md).
+
+- `ConnectionManager` is created by `InkBridgeApp` and outlives every screen. It owns:
+  - one `InkBridgeClient` (one stream ID per process, so a reconnect can re-send lost messages);
+  - the `CanvasDocument` mirror;
+  - `BonjourDiscovery`, `NetworkMonitor` and `PairingStore`.
+- It starts when any screen is visible and stops 4 s after the last one is hidden.
+- Screens observe `manager.status: StateFlow<StatusView>`. That is the pure `ConnectionStatus` mapping in `:core`, unit-tested.
+- Credentials and transport are re-evaluated before every attempt:
+  - pairing in progress → `Credentials.Pair` and `TlsTransport` to the chosen address;
+  - paired → `Credentials.Token` and `TlsTransport` pinned to the stored fingerprint, at the address discovery currently sees for that `host_id` (falling back to the last address that worked);
+  - USB mode → `AdbReverseTransport`.
+- See [wireless-connection.md](wireless-connection.md).

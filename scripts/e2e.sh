@@ -4,7 +4,9 @@
 # Swift inkbridge-probe (same InkServer + StrokeStore as the Mac app).
 #
 #   scripts/e2e.sh          USB path (loopback :8765, as adb reverse delivers it)
-#   scripts/e2e.sh wifi     Wi-Fi path (LAN :8766 with pairing challenge)
+#   scripts/e2e.sh wifi     Wi-Fi path: TLS on the LAN address :8766, pairing with a
+#                           one-time code, then a dropped link that must recover
+#                           with the device token
 set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 MODE="${1:-usb}"
@@ -21,14 +23,16 @@ done
 
 make -s -C "$ROOT/apps/macos" release >/dev/null
 PROBE="$HOME/Library/Caches/InkBridge/macos-build/release/inkbridge-probe"
-"$PROBE" --seconds 25 --code "$CODE" --expect-strokes "$STROKES" >"$LOG" 2>&1 &
+EXPECT=(--expect-strokes "$STROKES")
+[ "$MODE" = wifi ] && EXPECT+=(--expect-pairings 1)
+"$PROBE" --seconds 25 --code "$CODE" "${EXPECT[@]}" >"$LOG" 2>&1 &
 PROBE_PID=$!
 trap 'kill $PROBE_PID 2>/dev/null || true' EXIT
 sleep 1
 
 if [ "$MODE" = wifi ]; then
   HOST="$(ipconfig getifaddr en0 || ipconfig getifaddr en1 || echo 127.0.0.1)"
-  ARGS="--wifi $HOST --code $CODE --strokes $STROKES"
+  ARGS="--wifi $HOST --code $CODE --strokes $STROKES --reconnect"
 else
   ARGS="--strokes $STROKES"
 fi

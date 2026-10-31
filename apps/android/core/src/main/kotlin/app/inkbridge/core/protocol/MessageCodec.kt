@@ -45,9 +45,24 @@ object MessageCodec {
     }
 
     private fun fields(p: Payload): Map<String, JsonElement> = when (p) {
-        is Payload.AuthChallenge -> mapOf("nonce" to JsonPrimitive(p.nonce), "required" to JsonPrimitive(p.required))
+        is Payload.AuthChallenge -> mapOf(
+            "nonce" to JsonPrimitive(p.nonce),
+            "required" to JsonPrimitive(p.required),
+            "host_id" to JsonPrimitive(p.hostId),
+        )
         is Payload.Hello -> helloFields(p.hello)
-        is Payload.Ready -> mapOf("host_name" to JsonPrimitive(p.hostName), "session_id" to JsonPrimitive(p.sessionId))
+        is Payload.Ready -> mapOf(
+            "host_name" to JsonPrimitive(p.hostName),
+            "session_id" to JsonPrimitive(p.sessionId),
+            "host_id" to JsonPrimitive(p.hostId),
+            "resume_sequence" to JsonPrimitive(p.resumeSequence),
+        )
+        is Payload.PairGranted -> mapOf(
+            "host_id" to JsonPrimitive(p.hostId),
+            "host_name" to JsonPrimitive(p.hostName),
+            "token" to JsonPrimitive(p.token),
+            "proof" to JsonPrimitive(p.proof),
+        )
         is Payload.Disconnect -> mapOf("reason" to JsonPrimitive(p.reason))
         is Payload.Surface -> mapOf(
             "surface_width_px" to JsonPrimitive(p.widthPx),
@@ -99,6 +114,7 @@ object MessageCodec {
             put("stylus_button", h.capabilities.stylusButton)
         })
         h.auth?.let { put("auth", JsonPrimitive(it)) }
+        h.authMode?.let { put("auth_mode", JsonPrimitive(it.wire)) }
     }
 
     private fun style(s: WireStyle) = buildJsonObject {
@@ -129,9 +145,10 @@ object MessageCodec {
     }
 
     private fun payload(type: String, f: Fields): Payload = when (type) {
-        "auth.challenge" -> Payload.AuthChallenge(f.hex("nonce"), f.bool("required"))
+        "auth.challenge" -> Payload.AuthChallenge(f.hex("nonce"), f.bool("required"), f.string("host_id"))
         "device.hello" -> Payload.Hello(hello(f))
-        "device.ready" -> Payload.Ready(f.string("host_name"), f.string("session_id"))
+        "device.ready" -> Payload.Ready(f.string("host_name"), f.string("session_id"), f.string("host_id"), f.nonNegativeLong("resume_sequence"))
+        "pair.granted" -> Payload.PairGranted(f.string("host_id"), f.string("host_name"), f.hex("token"), f.hex("proof"))
         "device.disconnect" -> Payload.Disconnect(f.string("reason"))
         "device.surface" -> Payload.Surface(f.dimension("surface_width_px"), f.dimension("surface_height_px"))
         "stroke.begin" -> Payload.StrokeBegin(
@@ -191,6 +208,7 @@ object MessageCodec {
             surfaceHeightPx = f.dimension("surface_height_px"),
             capabilities = Capabilities(caps.bool("pressure"), caps.bool("tilt"), caps.bool("eraser"), caps.bool("stylus_button")),
             auth = f.optionalHex("auth"),
+            authMode = f.optionalString("auth_mode")?.let { AuthMode.fromWire(it) ?: throw ProtocolException("invalid field auth_mode") },
         )
     }
 

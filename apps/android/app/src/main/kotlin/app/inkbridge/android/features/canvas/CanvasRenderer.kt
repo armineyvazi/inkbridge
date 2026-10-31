@@ -8,6 +8,7 @@ import android.graphics.Rect
 import android.os.Handler
 import android.os.HandlerThread
 import android.view.SurfaceHolder
+import app.inkbridge.android.features.settings.CanvasBackground
 import app.inkbridge.core.canvas.Bounds
 import app.inkbridge.core.canvas.CanvasDocument
 import app.inkbridge.core.canvas.Viewport
@@ -52,6 +53,10 @@ class CanvasRenderer(private val document: CanvasDocument) {
         private set
     @Volatile var inkVisible = true
         set(value) { field = value; requestFull() }
+    /** Paper pattern, anchored to canvas coordinates so it pans and zooms with the ink. */
+    @Volatile var background = CanvasBackground.BLANK
+        set(value) { field = value; requestFull() }
+    private val patternPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = 0xFF9A9A9A.toInt() }
     @Volatile private var preview: Viewport? = null
     private val pendingIds = LinkedHashSet<String>()
     private val fullRequested = AtomicBoolean(true)
@@ -127,6 +132,7 @@ class CanvasRenderer(private val document: CanvasDocument) {
         synchronized(pendingIds) { pendingIds.clear() }
         drawnUpTo.clear()
         c.drawColor(Color.WHITE)
+        drawBackground(c, v, bmp.width, bmp.height)
         if (inkVisible) {
             val visible = Bounds(v.x, v.y, v.x + bmp.width / v.zoom, v.y + bmp.height / v.zoom)
             // Copy what is visible under the lock, draw outside it.
@@ -172,6 +178,34 @@ class CanvasRenderer(private val document: CanvasDocument) {
             canvas.drawBitmap(bmp, 0f, 0f, null)
         } finally {
             h.unlockCanvasAndPost(canvas)
+        }
+    }
+
+    /**
+     * Dots or lines every 48 canvas px. Skipped when zoomed out so far that
+     * they would be closer than 12 screen px (a grey wash on e-ink).
+     */
+    private fun drawBackground(c: Canvas, v: Viewport, w: Int, h: Int) {
+        val bg = background
+        if (bg == CanvasBackground.BLANK) return
+        val step = PATTERN * v.zoom
+        if (step < 12) return
+        val firstX = Math.floor(v.x / PATTERN) * PATTERN
+        val firstY = Math.floor(v.y / PATTERN) * PATTERN
+        var y = firstY
+        while (v.toViewY(y) <= h) {
+            val vy = v.toViewY(y)
+            if (bg == CanvasBackground.LINES) {
+                patternPaint.strokeWidth = 1f
+                c.drawLine(0f, vy, w.toFloat(), vy, patternPaint)
+            } else {
+                var x = firstX
+                while (v.toViewX(x) <= w) {
+                    c.drawCircle(v.toViewX(x), vy, 1.6f, patternPaint)
+                    x += PATTERN
+                }
+            }
+            y += PATTERN
         }
     }
 
@@ -223,4 +257,8 @@ class CanvasRenderer(private val document: CanvasDocument) {
     // Same width rule as the Mac renderer: 30 % of the width at zero pressure.
     private fun width(base: Float, p: Double, pressureSensitive: Boolean): Float =
         if (pressureSensitive) maxOf(base * (0.3f + 0.7f * p.toFloat().coerceIn(0f, 1f)), 1f) else maxOf(base, 1f)
+
+    private companion object {
+        const val PATTERN = 48.0
+    }
 }

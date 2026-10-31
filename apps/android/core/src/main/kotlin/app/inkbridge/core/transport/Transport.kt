@@ -26,6 +26,12 @@ interface Transport {
 
     suspend fun connect()
 
+    /**
+     * SHA-256 of the TLS certificate the peer presented, once connected.
+     * Null for plain TCP (USB), whose handshake proofs use an empty fingerprint.
+     */
+    val peerFingerprint: ByteArray? get() = null
+
     /** Sends one frame payload; framing is applied by the transport. */
     suspend fun send(data: ByteArray)
 

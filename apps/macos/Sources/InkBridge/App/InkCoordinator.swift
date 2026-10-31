@@ -27,6 +27,7 @@ final class InkCoordinator: NSObject {
     private(set) var overlayView: OverlayView!
     private(set) var toolbar: ToolbarController!
     private(set) lazy var exporter = ExportController(coordinator: self)
+    private(set) lazy var connectDevice = ConnectDeviceController(coordinator: self)
     var settingsWindow: NSWindow?
     let hotKeys = HotKeyCenter()
     private var bag = Set<AnyCancellable>()
@@ -38,18 +39,43 @@ final class InkCoordinator: NSObject {
     private var inputLatency = LatencyStats()
     private var renderLatency = LatencyStats()
     private var pendingReceiveNs: Int64?
+    private var lastActiveStream: String?
+
+    let pairedDevices: PairedDevices
+    let identity: HostIdentity?
+    private lazy var networkWatcher = NetworkWatcher { [weak self] in self?.server.restartWifiListener() }
+    /// The stream of the tablet that was active before a drop; its strokes in
+    /// progress are kept open for `strokeGrace` so a reconnect can finish them.
+    private var parkedStream: String?
+    private var parkTimer: Timer?
+    private static let strokeGrace: TimeInterval = 10
+    /// Peers that connected while a stroke was in progress; elected once it ends,
+    /// so a transport switch never cuts a stroke in half.
+    private var deferredPeers: [PeerArbiter.Peer] = []
 
     init(model: AppModel, sessionID: String? = nil) {
         self.model = model
         self.sessionID = sessionID ?? Self.newSessionID()
         arbiter = PeerArbiter(preference: model.transportPreference)
+        pairedDevices = PairedDevices(url: Self.supportDirectory.appendingPathComponent("paired-devices.json"))
+        do {
+            identity = try HostIdentity.loadOrCreate(in: Self.supportDirectory.appendingPathComponent("Identity"))
+        } catch {
+            identity = nil
+            model.connection.lastError = "Wi-Fi unavailable: could not create the TLS identity (\(error))"
+        }
         var config = InkServer.Config(
             serviceName: Host.current().localizedName ?? "Mac",
-            pairingCode: model.pairingCode,
-            sessionID: self.sessionID
+            sessionID: self.sessionID,
+            identity: identity,
+            pairedDevices: pairedDevices
         )
-        config.wifiEnabled = model.wifiEnabled
+        config.wifiEnabled = model.wifiEnabled && identity != nil
         server = InkServer(config: config)
+        model.hostFingerprint = identity?.shortFingerprint ?? ""
+        model.hostFingerprintHex = identity?.fingerprint.hexString ?? ""
+        model.hostID = config.hostID
+        model.pairedDevices = pairedDevices.all
         super.init()
         server.delegate = self
     }
@@ -71,6 +97,7 @@ final class InkCoordinator: NSObject {
         registerHotKeys()
         observeModel()
         server.start()
+        networkWatcher.start()
         autosaveTimer = Timer.scheduledTimer(withTimeInterval: 5, repeats: true) { [weak self] _ in self?.autosave() }
         NotificationCenter.default.addObserver(self, selector: #selector(screensChanged),
                                                name: NSApplication.didChangeScreenParametersNotification, object: nil)
@@ -175,10 +202,31 @@ final class InkCoordinator: NSObject {
 extension InkCoordinator: InkServerDelegate {
     func inkServer(_ server: InkServer, didConnect peer: PeerInfo) {
         peers[peer.id] = peer
-        let before = arbiter.activeID
-        arbiter.add(.init(id: peer.id, kind: peer.kind, connectedAt: Date()))
-        if arbiter.activeID != before { activePeerChanged() }
         log.info("connected \(peer.hello.deviceName, privacy: .public) via \(peer.kind.rawValue, privacy: .public)")
+        let entry = PeerArbiter.Peer(id: peer.id, kind: peer.kind, connectedAt: Date())
+        // A second link from the tablet that is drawing right now waits until the stroke ends.
+        if activePeer != nil && !store.active.isEmpty {
+            deferredPeers.append(entry)
+            return
+        }
+        elect(entry)
+        model.pairedDevices = pairedDevices.all
+    }
+
+    private func elect(_ entry: PeerArbiter.Peer) {
+        let before = arbiter.activeID
+        arbiter.add(entry)
+        if arbiter.activeID != before { activePeerChanged() }
+    }
+
+    func inkServer(_ server: InkServer, didPair device: PairedDevice) {
+        model.pairedDevices = pairedDevices.all
+        model.justPaired = device
+        model.statusMessage = "Paired with \(device.name)"
+    }
+
+    func inkServer(_ server: InkServer, pairingTicketChanged ticket: PairingTicket?) {
+        model.pairingTicket = ticket
     }
 
     func inkServer(_ server: InkServer, peer: PeerInfo, didReceive message: Message, receivedAtNs: Int64) {
@@ -186,6 +234,11 @@ extension InkCoordinator: InkServerDelegate {
         recordInputLatency(message, receivedAt: receivedAtNs)
         let change = ingestor.handle(message, streamID: peer.hello.streamID)
         followUp(message, change: change, peer: peer)
+        if !deferredPeers.isEmpty && store.active.isEmpty {
+            let waiting = deferredPeers
+            deferredPeers.removeAll()
+            waiting.filter { peers[$0.id] != nil }.forEach(elect)
+        }
         switch change {
         case .none:
             break
@@ -226,6 +279,7 @@ extension InkCoordinator: InkServerDelegate {
 
     func inkServer(_ server: InkServer, didDisconnect peer: PeerInfo, reason: String) {
         peers.removeValue(forKey: peer.id)
+        deferredPeers.removeAll { $0.id == peer.id }
         let wasActive = arbiter.isActive(peer.id)
         arbiter.remove(peer.id)
         log.info("disconnected \(peer.hello.deviceName, privacy: .public): \(reason, privacy: .public)")
@@ -240,18 +294,42 @@ extension InkCoordinator: InkServerDelegate {
         if case .failed(let e) = state { model.connection.lastError = "\(listener.rawValue) listener failed: \(e)" }
     }
 
-    /// Strokes in progress belong to the old link: finish them, then give the
-    /// new tablet the whole document once. Later changes go out as diffs.
+    /// Gives the new active tablet the whole document once; later changes go
+    /// out as diffs.
+    ///
+    /// Strokes in progress: if the same tablet process comes back (same
+    /// stream ID, e.g. after a Wi-Fi blip) they continue, because the tablet
+    /// re-sends what the dead link lost (`resume_sequence`). A different
+    /// tablet, or none for `strokeGrace`, ends them so nothing hangs open.
     private func activePeerChanged() {
-        store.endAll()
+        let peer = activePeer
+        let stream = peer?.hello.streamID
+        parkTimer?.invalidate()
+        if peer == nil, !store.active.isEmpty, let previous = lastActiveStream {
+            parkedStream = previous
+            parkTimer = Timer.scheduledTimer(withTimeInterval: Self.strokeGrace, repeats: false) { [weak self] _ in
+                guard let self else { return }
+                self.parkedStream = nil
+                self.store.endAll()
+                self.overlayView.needsDisplay = true
+                self.refreshEditState()
+            }
+        } else if stream == nil || stream != parkedStream && stream != lastActiveStream {
+            store.endAll()
+            parkedStream = nil
+        } else {
+            parkedStream = nil
+        }
+        lastActiveStream = stream ?? lastActiveStream
         overlayView.needsDisplay = true
         refreshEditState()
         clock.reset()
         inputLatency.reset()
         sync.reset()
-        let peer = activePeer
         model.connection.deviceName = peer?.hello.deviceName
         model.connection.transport = peer?.kind
+        model.connection.remote = peer.map { Self.displayAddress($0.remote) }
+        if peer != nil { model.connection.lastConnectedAt = Date() }
         model.rttMs = nil
         model.inputLatencyMs = nil
         if let peer {
@@ -259,6 +337,12 @@ extension InkCoordinator: InkServerDelegate {
             send(sync.resync(store.strokes), to: peer)
         }
         relayoutOverlay()
+    }
+
+    /// "192.168.1.20" from an endpoint description like "192.168.1.20:50211".
+    static func displayAddress(_ remote: String) -> String {
+        guard let colon = remote.lastIndex(of: ":"), !remote.hasPrefix("[") else { return remote }
+        return String(remote[..<colon])
     }
 
     // MARK: Latency
@@ -294,6 +378,10 @@ extension InkCoordinator: InkServerDelegate {
         usb listener: \(model.connection.usbListening ? "listening :8765" : "not listening")
         wifi listener: \(model.connection.wifiListening ? "listening :8766" : "not listening")
         transport preference: \(model.transportPreference.rawValue)
+        host id: \(model.hostID)
+        tls fingerprint: \(model.hostFingerprint.isEmpty ? "none" : model.hostFingerprint)
+        paired devices: \(model.pairedDevices.map { "\($0.name) (last seen \($0.lastSeen.map { ISO8601DateFormatter().string(from: $0) } ?? "never"))" }.joined(separator: "; "))
+        connect window: \(model.pairingTicket == nil ? "closed" : "open")
         connected peers: \(peers.values.map { "\($0.hello.deviceName) [\($0.kind.rawValue)] api=\($0.hello.androidAPI) surface=\($0.hello.surfaceWidthPx)x\($0.hello.surfaceHeightPx) pressure=\($0.hello.capabilities.pressure)" }.joined(separator: "; "))
         active peer: \(activePeer?.hello.deviceName ?? "none")
         last error: \(model.connection.lastError ?? "none")

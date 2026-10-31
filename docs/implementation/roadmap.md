@@ -71,12 +71,27 @@ adb reverse, p50 5 ms). Note Air 3 itself is still untested.
 | Deliverable | Status |
 |-------------|--------|
 | `NativeUsbTransport` over AOA (no developer mode) | ⬜ next |
-| TLS on Wi-Fi with fingerprint pinning + QR pairing | ⬜ |
+| TLS on Wi-Fi with fingerprint pinning + QR pairing | ✅ v0.3 (see below) |
 | Calibration wizard (4-point affine) | ⬜ |
 | Onboarding flow (welcome → connect → permissions → display → draw) | ⬜ |
 | Diagnostic report export | ✅ Mac / ⬜ tablet export |
 | Developer ID signing, notarization, installer | ⬜ |
 | Localization | ⬜ |
+
+## v0.3: wireless-first + e-ink UI (2026-10-31)
+
+| Deliverable | Status |
+|-------------|--------|
+| Protocol v3: TLS (pinned self-signed cert), one-time Connect Device codes, device tokens, `resume_sequence` | ✅ unit + JVM↔Swift e2e + **hardware** |
+| Bonjour discovery with host identity (TXT `id`), manual-address fallback | ✅ hardware (discovered the Mac at 13.0.0.156) |
+| QR `inkbridge://pair` link (fingerprint pre-pinned) | ✅ unit + deep-link tests; BOOX has no camera |
+| Connect Device window on the Mac (code, countdown, QR, paired list, Forget) | 🟡 built; manual check pending |
+| Network-change reconnect, lossless replay, stroke continuity across drops | ✅ unit; ✅ hardware Wi-Fi off/on |
+| Mac listener restart after wake / path change | 🟡 built; sleep/wake not run |
+| Android redesign: dashboard, connect, canvas, settings, diagnostics, design system | ✅ Robolectric + hardware screenshots |
+| Wi-Fi from the real InkBridge.app (vs. probe host) on hardware | 🟡 pending: needs a click in Connect Device |
+| Router restart / IP change / Mac sleep on hardware | ⬜ |
+| Wi-Fi Direct / Mac-hosted network for different-network use | ⬜ future |
 
 ## Proposed next phase
 
@@ -87,4 +102,4 @@ adb reverse, p50 5 ms). Note Air 3 itself is still untested.
 3. **AOA transport**: extend `tools/aoa-probe` to the full handshake, then build
    `NativeUsbTransport` on both sides. This removes the developer-mode requirement,
    the biggest blocker for real users.
-4. **TLS + QR pairing** for Wi-Fi.
+4. ~~TLS + QR pairing for Wi-Fi~~ done in v0.3.

@@ -11,10 +11,18 @@
 - Still retrying → is InkBridge running on the Mac? Check with
   `lsof -nP -iTCP:8765 -sTCP:LISTEN`.
 
-## "pairing code rejected by the Mac"
+## Tablet says "Wrong code", "Code expired", "Pair again" or "Mac identity changed"
 
-The code changed (Settings → *New code*) or was mistyped. Codes ignore case and
-spaces. After 5 wrong attempts in a minute, the Mac refuses LAN connections **from that tablet's IP** for 30 s (doubling on repeats);
+- **Wrong code**: retype it; case and the dash do not matter. Five wrong codes void
+  that code. Open Connect Device again for a new one.
+- **Code expired**: codes live 5 minutes and work once, and only while Connect Device
+  is open on the Mac. Reopen it (⌃⌥K).
+- **Pair again**: the Mac forgot this tablet (Forget was pressed, or InkBridge's data
+  on the Mac was reset). Pair again from Connect to Mac.
+- **Mac identity changed**: the Mac's TLS certificate differs from the one the tablet
+  pinned. Expected after deleting `~/Library/Application Support/InkBridge/Identity`.
+  Otherwise, treat it as suspicious. Forget the Mac in the tablet's Settings and pair again.
+- Repeated failures from one IP are locked out for 30 s (doubling on repeats);
 up to 60 s.
 
 ## Wi-Fi: the tablet cannot find the Mac

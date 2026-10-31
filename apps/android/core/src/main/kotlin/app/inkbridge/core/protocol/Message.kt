@@ -1,7 +1,7 @@
 package app.inkbridge.core.protocol
 
 /** The protocol version this build speaks. */
-const val PROTOCOL_VERSION = 2
+const val PROTOCOL_VERSION = 3
 
 /** The tool a stroke is drawn with. The device sends only [PEN] or [ERASER]. */
 enum class Tool(val wire: String) {
@@ -51,22 +51,42 @@ data class DeviceHello(
     val surfaceWidthPx: Int,
     val surfaceHeightPx: Int,
     val capabilities: Capabilities,
-    /** Hex HMAC-SHA256 of the challenge nonce keyed by the pairing code. */
+    /** Hex HMAC-SHA256 proof over the challenge (see [PairingAuth]). */
     val auth: String?,
+    /** Which secret [auth] is keyed with; null when no proof is sent. */
+    val authMode: AuthMode? = null,
 )
+
+/** First contact proves the Connect Device code; afterwards, the device token. */
+enum class AuthMode(val wire: String) {
+    PAIR("pair"), TOKEN("token");
+
+    companion object {
+        fun fromWire(s: String): AuthMode? = entries.firstOrNull { it.wire == s }
+    }
+}
 
 /** The typed body of a message. [type] is the wire name. */
 sealed interface Payload {
     val type: String
 
-    data class AuthChallenge(val nonce: String, val required: Boolean) : Payload {
+    /** [hostId] is the Mac's stable identity. */
+    data class AuthChallenge(val nonce: String, val required: Boolean, val hostId: String) : Payload {
         override val type get() = "auth.challenge"
     }
     data class Hello(val hello: DeviceHello) : Payload {
         override val type get() = "device.hello"
     }
-    data class Ready(val hostName: String, val sessionId: String) : Payload {
+    /**
+     * [resumeSequence]: the highest sequence the Mac already holds for this
+     * stream. The device re-sends what it sent after that on a dead link.
+     */
+    data class Ready(val hostName: String, val sessionId: String, val hostId: String, val resumeSequence: Long) : Payload {
         override val type get() = "device.ready"
+    }
+    /** Host → device after a correct pairing code: the device token and the Mac's own proof. */
+    data class PairGranted(val hostId: String, val hostName: String, val token: String, val proof: String) : Payload {
+        override val type get() = "pair.granted"
     }
     data class Disconnect(val reason: String) : Payload {
         override val type get() = "device.disconnect"

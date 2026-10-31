@@ -1,0 +1,1 @@
+inkbridge://pair?v=3&name=Armin%E2%80%99s%20MacBook%20Pro&id=6f1d3c2a-1b5e-4c3d-9a7f-2e8b0c4d5a61&addr=192.168.1.20,10.0.0.5&port=8766&code=K7QWM3XP&fp=a0a1a2a3a4a5a6a7a8a9aaabacadaeafb0b1b2b3b4b5b6b7b8b9babbbcbdbebf&exp=1793448000

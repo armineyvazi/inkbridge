@@ -26,10 +26,10 @@ import java.net.Socket
  * disconnect detector.
  */
 open class TcpTransport(
-    private val host: String,
-    private val port: Int,
+    protected val host: String,
+    protected val port: Int,
     override val kind: TransportKind,
-    private val connectTimeoutMs: Int = 3_000,
+    protected val connectTimeoutMs: Int = 3_000,
     private val io: CoroutineDispatcher = Dispatchers.IO,
 ) : Transport {
     private val state = MutableStateFlow<ConnectionState>(ConnectionState.Disconnected)
@@ -44,14 +44,9 @@ open class TcpTransport(
     override suspend fun connect() = withContext(io) {
         check(socket == null) { "transport is single-use" }
         state.value = ConnectionState.Connecting
-        val s = Socket()
-        try {
-            // Disable Nagle: each message is tiny and latency matters more than packet count.
-            s.tcpNoDelay = true
-            s.keepAlive = true
-            s.connect(InetSocketAddress(host, port), connectTimeoutMs)
+        val s = try {
+            open()
         } catch (e: IOException) {
-            s.close()
             state.value = ConnectionState.Failed("connect $host:$port: ${e.message}")
             inbox.close()
             throw e
@@ -63,6 +58,21 @@ open class TcpTransport(
             isDaemon = true
             start()
         }
+    }
+
+    /** Opens the connected socket; subclasses add layers such as TLS. Closes it on failure. */
+    protected open fun open(): Socket {
+        val s = Socket()
+        try {
+            // Disable Nagle: each message is tiny and latency matters more than packet count.
+            s.tcpNoDelay = true
+            s.keepAlive = true
+            s.connect(InetSocketAddress(host, port), connectTimeoutMs)
+        } catch (e: IOException) {
+            s.close()
+            throw e
+        }
+        return s
     }
 
     private fun readLoop(s: Socket) {
@@ -120,9 +130,6 @@ open class TcpTransport(
 class AdbReverseTransport(port: Int = DEFAULT_USB_PORT) :
     TcpTransport("127.0.0.1", port, TransportKind.USB)
 
-/** LAN connection to the Mac's Wi-Fi listener; the host requires pairing. */
-class WifiTcpTransport(host: String, port: Int = DEFAULT_WIFI_PORT) :
-    TcpTransport(host, port, TransportKind.WIFI)
 
 const val DEFAULT_USB_PORT = 8765
 const val DEFAULT_WIFI_PORT = 8766

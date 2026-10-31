@@ -1,7 +1,7 @@
 import Foundation
 
 /// The protocol version this build speaks. Peers with a different version are rejected.
-public let inkProtocolVersion = 2
+public let inkProtocolVersion = 3
 
 /// The tool a stroke was drawn with.
 ///
@@ -90,12 +90,15 @@ public struct DeviceHello: Equatable, Sendable {
     public var surfaceWidthPx: Int
     public var surfaceHeightPx: Int
     public var capabilities: DeviceCapabilities
-    /// Hex HMAC-SHA256 of the auth.challenge nonce, keyed by the pairing code.
+    /// How `auth` was computed (`.pair` or `.token`); nil when no proof is sent.
+    public var authMode: AuthMode?
+    /// Hex HMAC-SHA256 proof over the challenge (see PairingAuth).
     public var auth: String?
 
     public init(
         deviceID: String, deviceName: String, model: String, androidAPI: Int, streamID: String,
-        surfaceWidthPx: Int, surfaceHeightPx: Int, capabilities: DeviceCapabilities, auth: String?
+        surfaceWidthPx: Int, surfaceHeightPx: Int, capabilities: DeviceCapabilities,
+        authMode: AuthMode? = nil, auth: String?
     ) {
         self.deviceID = deviceID
         self.deviceName = deviceName
@@ -105,15 +108,31 @@ public struct DeviceHello: Equatable, Sendable {
         self.surfaceWidthPx = surfaceWidthPx
         self.surfaceHeightPx = surfaceHeightPx
         self.capabilities = capabilities
+        self.authMode = authMode
         self.auth = auth
     }
 }
 
+/// Which secret a device's proof is keyed with.
+public enum AuthMode: String, Sendable {
+    /// First contact: the short-lived code shown in the Mac's Connect Device window.
+    case pair
+    /// Every later connection: the 256-bit token the Mac issued at pairing.
+    case token
+}
+
 /// The typed body of a protocol message.
 public enum Payload: Equatable, Sendable {
-    case authChallenge(nonce: String, required: Bool)
+    /// `hostID` is the Mac's stable identity, so a device can tell which Mac it reached.
+    case authChallenge(nonce: String, required: Bool, hostID: String)
     case deviceHello(DeviceHello)
-    case deviceReady(hostName: String, sessionID: String)
+    /// Host → device after a successful `.pair` proof, before `device.ready`.
+    /// `proof` shows the host knew the code too; `token` is the long-lived device secret.
+    case pairGranted(hostID: String, hostName: String, token: String, proof: String)
+    /// `resumeSequence` is the highest sequence the host already holds for the
+    /// hello's stream (0 if none): the device re-sends anything after it that
+    /// was lost with the previous connection.
+    case deviceReady(hostName: String, sessionID: String, hostID: String, resumeSequence: UInt64)
     case deviceDisconnect(reason: String)
     case deviceSurface(widthPx: Int, heightPx: Int)
     /// `style` is set on host→device strokes; devices omit it.
@@ -144,6 +163,7 @@ public enum Payload: Equatable, Sendable {
         switch self {
         case .authChallenge: return "auth.challenge"
         case .deviceHello: return "device.hello"
+        case .pairGranted: return "pair.granted"
         case .deviceReady: return "device.ready"
         case .deviceDisconnect: return "device.disconnect"
         case .deviceSurface: return "device.surface"

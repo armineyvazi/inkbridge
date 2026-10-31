@@ -61,11 +61,15 @@ make install     # adb install -r
 
 ## Connect over Wi-Fi
 
-1. Mac and tablet on the same network. On the Mac, the menu bar shows
-   *Wi-Fi pairing code: XXXX-XXXX*.
-2. On the tablet: **Settings → Wi-Fi**. The Mac's address fills in automatically
-   through Bonjour, or type it (`ipconfig getifaddr en0`). Enter the pairing code,
-   then Save.
+Wi-Fi is the default and needs no cable, adb or USB debugging.
+
+1. Put the Mac and the tablet on the same Wi-Fi network.
+2. On the Mac: menu-bar pen → **Connect Device…** (⌃⌥K). A one-time code appears.
+3. On the tablet: InkBridge → **Connect to Mac**, choose the Mac, type the code, Pair.
+   The first time, macOS may ask whether InkBridge may accept incoming connections:
+   choose **Allow**.
+4. From then on the tablet reconnects by itself. If the Mac does not appear in the
+   list, use **Enter the Mac's address** (`ipconfig getifaddr en0`).
 
 ## Without hardware
 

@@ -37,7 +37,7 @@ flowchart TB
 ```
 
 - `AppModel` holds the UI state (tool, colors, widths, connection status, latency) and
-  the persisted preferences (pairing code, Wi-Fi on/off, transport preference,
+  the persisted preferences (Wi-Fi on/off, transport preference,
   display, fit, screenshot opt-in).
 - `InkCoordinator` is the only place where the server, the drawing model and the
   windows meet. It implements `InkServerDelegate` and `ToolbarActions`. After every

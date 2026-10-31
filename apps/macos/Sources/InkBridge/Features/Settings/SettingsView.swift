@@ -4,29 +4,41 @@ import SwiftUI
 /// Connection, display and capture preferences, plus first-run instructions.
 struct SettingsView: View {
     @ObservedObject var model: AppModel
-    var regenerateCode: () -> Void
+    var connectDevice: () -> Void
+    var forget: (PairedDevice) -> Void
     var exportDiagnostics: () -> Void
 
     var body: some View {
         Form {
-            Section("Connect your BOOX") {
+            Section("Wi-Fi") {
+                Toggle("Allow Wi-Fi connections", isOn: $model.wifiEnabled)
+                LabeledContent("Status") {
+                    Text(model.connection.wifiListening ? "Ready · encrypted (TLS) · port 8766" : "Not listening")
+                        .foregroundStyle(.secondary)
+                }
+                Button("Connect Device…", action: connectDevice)
+                Text("Shows a one-time code for pairing a new tablet. Paired tablets reconnect by themselves.")
+                    .font(.caption).foregroundStyle(.secondary)
+            }
+
+            Section("Paired tablets") {
+                if model.pairedDevices.isEmpty {
+                    Text("None yet.").foregroundStyle(.secondary)
+                }
+                ForEach(model.pairedDevices) { d in
+                    LabeledContent(d.name) {
+                        Button("Forget") { forget(d) }
+                    }
+                }
+            }
+
+            Section("USB") {
                 LabeledContent("USB (adb reverse)") {
                     Text(model.connection.usbListening ? "listening on 127.0.0.1:8765" : "not listening")
                         .foregroundStyle(.secondary)
                 }
-                Text("Run `adb reverse tcp:8765 tcp:8765` once per cable connection, then choose USB in the InkBridge app on the tablet.")
+                Text("Optional. Needs USB debugging on the tablet and `adb reverse tcp:8765 tcp:8765` once per cable connection.")
                     .font(.caption).foregroundStyle(.secondary)
-                Toggle("Allow Wi-Fi connections", isOn: $model.wifiEnabled)
-                if model.wifiEnabled {
-                    LabeledContent("Pairing code") {
-                        HStack {
-                            Text(model.pairingCode).font(.system(.title3, design: .monospaced)).textSelection(.enabled)
-                            Button("New code", action: regenerateCode)
-                        }
-                    }
-                    Text("Enter this code on the tablet. Changing it disconnects Wi-Fi devices paired with the old one.")
-                        .font(.caption).foregroundStyle(.secondary)
-                }
                 Picker("When both are connected", selection: $model.transportPreference) {
                     Text("Prefer USB").tag(PeerArbiter.Preference.preferUSB)
                     Text("USB only").tag(PeerArbiter.Preference.usbOnly)

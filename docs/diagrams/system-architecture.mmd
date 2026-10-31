@@ -9,7 +9,7 @@ flowchart TB
     VP --> CL["InkBridgeClient<br/>outbox · sequence · handshake<br/>ping/pong · reconnect"]
     CL --> TR{"Transport"}
     TR --> ADB["AdbReverseTransport<br/>127.0.0.1:8765"]
-    TR --> WIFI["WifiTcpTransport<br/>mac-ip:8766"]
+    TR --> WIFI["TlsTransport<br/>mac-ip:8766 (TLS, pinned)"]
     TR -.-> AOA["NativeUsbTransport (AOA)<br/>planned · handshake verified"]
     AMES --> CD["CanvasDocument<br/>mirror of the Mac document"]
     CL -- "doc.* · stroke.style · viewport" --> CD

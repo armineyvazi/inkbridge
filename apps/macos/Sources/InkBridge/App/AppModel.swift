@@ -28,6 +28,10 @@ final class AppModel: ObservableObject {
         var usbListening = false
         var wifiListening = false
         var lastError: String?
+        /// When a tablet last became active (shown as "last connected").
+        var lastConnectedAt: Date?
+        /// Remote address of the active tablet ("Wi-Fi 192.168.1.20").
+        var remote: String?
 
         var isConnected: Bool { deviceName != nil }
     }
@@ -51,8 +55,18 @@ final class AppModel: ObservableObject {
     @Published var canRedo = false
     @Published var statusMessage: String?
 
+    // Pairing
+    /// The open Connect Device code, if any.
+    @Published var pairingTicket: PairingTicket?
+    @Published var pairedDevices: [PairedDevice] = []
+    /// Shown so people can compare it with the tablet's diagnostics screen.
+    @Published var hostFingerprint = ""
+    var hostFingerprintHex = ""
+    @Published var hostID = ""
+    /// Set when a pairing completes while the window is open.
+    @Published var justPaired: PairedDevice?
+
     // Preferences
-    @Published var pairingCode: String { didSet { defaults.set(pairingCode, forKey: "pairingCode") } }
     @Published var wifiEnabled: Bool { didSet { defaults.set(wifiEnabled, forKey: "wifiEnabled") } }
     @Published var transportPreference: PeerArbiter.Preference {
         didSet { defaults.set(transportPreference.rawValue, forKey: "transportPreference") }
@@ -75,7 +89,6 @@ final class AppModel: ObservableObject {
 
     init(defaults: UserDefaults = .standard) {
         self.defaults = defaults
-        pairingCode = defaults.string(forKey: "pairingCode") ?? PairingAuth.generateCode()
         wifiEnabled = defaults.object(forKey: "wifiEnabled") as? Bool ?? true
         transportPreference = PeerArbiter.Preference(rawValue: defaults.string(forKey: "transportPreference") ?? "") ?? .preferUSB
         fit = CoordinateMapper.Fit(rawValue: defaults.string(forKey: "fit") ?? "") ?? .aspectFit
@@ -85,7 +98,8 @@ final class AppModel: ObservableObject {
         toolbarSize = ToolbarSize(rawValue: defaults.string(forKey: "toolbarSize") ?? "") ?? .expanded
         toolbarDock = ToolbarDock(rawValue: defaults.string(forKey: "toolbarDock") ?? "") ?? .bottom
         toolbarVisible = defaults.object(forKey: "toolbarVisible") as? Bool ?? true
-        defaults.set(pairingCode, forKey: "pairingCode")
+        // v2 kept a permanent code; v3 issues short-lived ones on demand.
+        defaults.removeObject(forKey: "pairingCode")
     }
 
     static let palette: [RGBA] = [.red, .blue, .green, .black, .white]

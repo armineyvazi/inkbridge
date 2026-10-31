@@ -1,35 +1,42 @@
-%% Connection lifecycle shared by USB (loopback) and Wi-Fi (LAN) transports.
+%% Connection lifecycle (protocol v3). USB: plain TCP on 127.0.0.1:8765 via adb reverse, no proof.
+%% Wi-Fi: TLS on mac-ip:8766 with the Mac's self-signed certificate, pinned by the tablet.
 sequenceDiagram
   autonumber
   participant T as Tablet (InkBridgeClient)
   participant H as Mac (PeerConnection)
 
-  T->>H: TCP connect (127.0.0.1:8765 via adb reverse, or mac-ip:8766)
-  H->>T: auth.challenge {nonce (32 random bytes), required: false on USB / true on Wi-Fi}
-  alt required
-    T->>H: device.hello {…, auth = HMAC-SHA256(code, nonce)}
-    alt HMAC valid
-      H->>T: device.ready {host_name, session_id}
-    else invalid / missing
-      H->>T: error {code: auth_failed}
-      H--xT: close · failure counted for this IP (5 in 60 s ⇒ that IP locked out 30 s, doubling)
-      Note over T: ClientState.Failed — no retry loop
+  Note over T,H: Discovery: Bonjour _inkbridge._tcp, TXT id=host_id (Wi-Fi only)
+  T->>H: TCP connect · Wi-Fi: TLS handshake (tablet pins SHA-256 of the certificate if paired)
+  H->>T: auth.challenge {nonce, required (false on USB), host_id}
+  alt Wi-Fi, first contact (Connect Device open on the Mac)
+    T->>H: device.hello {…, auth_mode: pair, auth = HMAC(code, "…pair"‖0‖nonce‖fp_seen)}
+    alt code valid, window open, fp matches the Mac's own
+      H->>T: pair.granted {host_id, host_name, token, proof = HMAC(code, "…host"‖0‖nonce‖fp)}
+      Note over T: verify proof → store token + pin + host_id
+      Note over H: ticket closed (single use)
+    else wrong code / MITM fingerprint / window closed
+      H->>T: error {auth_failed | pairing_closed}
+      H--xT: close · 5 wrong codes void the ticket
+      Note over T: ClientState.Failed (no retry loop)
     end
-  else not required
+  else Wi-Fi, paired
+    Note over T: host_id must match the stored one, else no proof is sent
+    T->>H: device.hello {…, auth_mode: token, auth = HMAC(token, "…token"‖0‖nonce‖fp)}
+    alt unknown device
+      H->>T: error {not_paired} · tablet clears its pairing
+    end
+  else USB
     T->>H: device.hello {…}
-    H->>T: device.ready
   end
+  H->>T: device.ready {host_name, session_id, host_id, resume_sequence}
+  Note over T: re-send document messages with seq > resume_sequence<br/>(same host + session only), then canvas.viewport
 
   par every 2 s, both directions
-    H->>T: connection.ping {ping_id}
-    T->>H: connection.pong {ping_id, echo_timestamp_ns}
-  and
-    T->>H: connection.ping
-    H->>T: connection.pong
+    H->>T: connection.ping
+    T->>H: connection.pong
   end
-
   loop drawing
     T->>H: stroke.begin / stroke.point / stroke.end (ordered, sequenced)
   end
 
-  Note over T,H: No inbound bytes for 7 s ⇒ either side closes.<br/>Client retries 250 → 500 → 1000 → 2000 ms (±20 % jitter),<br/>re-handshakes, then flushes events queued during the outage.
+  Note over T,H: 7 s silence ⇒ close. Client retries 250 → 2000 ms (±20 %),<br/>and immediately on Android network-available (measured 163 ms to ready).<br/>Mac re-registers its listener after wake / path change.

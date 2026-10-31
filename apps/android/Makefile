@@ -6,7 +6,7 @@ GRADLE := ./gradlew
 .PHONY: test apk install simulate clean
 
 test:
-	$(GRADLE) :core:test
+	$(GRADLE) :core:test :app:testDebugUnitTest
 
 apk:
 	$(GRADLE) :app:assembleDebug
@@ -19,3 +19,8 @@ simulate:
 
 clean:
 	$(GRADLE) clean
+
+# Renders every screen at the Note Air's resolution into SHOTS (design review, no device needed).
+SHOTS ?= $(HOME)/Library/Caches/InkBridge/screenshots
+screenshots:
+	$(GRADLE) :app:testDebugUnitTest --tests '*ScreenshotTest*' -Dinkbridge.screenshots=$(SHOTS) --rerun
