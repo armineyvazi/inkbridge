@@ -3,7 +3,6 @@ package app.inkbridge.simulator
 import app.inkbridge.core.client.ClientState
 import app.inkbridge.core.client.DeviceDescriptor
 import app.inkbridge.core.client.InkBridgeClient
-import app.inkbridge.core.input.CoordinateNormalizer
 import app.inkbridge.core.input.PointerAction
 import app.inkbridge.core.input.RawSample
 import app.inkbridge.core.input.StrokeProcessor
@@ -62,7 +61,7 @@ fun main(args: Array<String>): Unit = runBlocking(Dispatchers.Default) {
     }
     println("connected: $ready")
 
-    val processor = StrokeProcessor(CoordinateNormalizer(width, height), client.streamId.take(8))
+    val processor = StrokeProcessor(streamTag = client.streamId.take(8))
     val periodMs = 1000L / hz
     repeat(strokes) { i ->
         val cx = width * (0.2f + 0.6f * ((i % 3) / 2f))

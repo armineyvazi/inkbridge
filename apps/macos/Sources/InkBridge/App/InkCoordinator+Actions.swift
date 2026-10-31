@@ -6,48 +6,34 @@ import SwiftUI
 // MARK: - Toolbar and hotkey actions
 
 extension InkCoordinator: ToolbarActions {
-    func undo() {
-        store.undo()
+    func undo() { edit { $0.undo() } }
+    func redo() { edit { $0.redo() } }
+    /// Clears the visible canvas. Undoable, and never touches saved sessions on disk.
+    func clear() { edit { $0.clear() } }
+
+    /// Applies a document edit, redraws, and mirrors the result to the tablet.
+    private func edit(_ change: (StrokeStore) -> Void) {
+        change(store)
         overlayView.needsDisplay = true
         refreshEditState()
+        syncDocument()
     }
 
-    func redo() {
-        store.redo()
-        overlayView.needsDisplay = true
-        refreshEditState()
-    }
+    func showToolbar() { toolbar.setVisible(true) }
+    func hideToolbar() { toolbar.setVisible(false) }
+    func toggleToolbar() { toolbar.setVisible(!model.toolbarVisible) }
+    var isToolbarVisible: Bool { model.toolbarVisible }
 
-    func clear() {
-        store.clear()
-        overlayView.needsDisplay = true
-        refreshEditState()
-    }
+    func homeView() { setViewport(.home) }
 
     func toggleOverlay() {
         model.overlayVisible.toggle()
         overlayView.isHidden = !model.overlayVisible
     }
 
+    /// Opens the native save dialog and exports the session (ExportController).
     func saveSession() {
-        let strokes = store.strokes
-        let metadata = makeMetadata()
-        let dir = Self.sessionsDirectory.appendingPathComponent(sessionID)
-        let displayID = model.displayID ?? overlayDisplayID
-        Task { @MainActor in
-            var background: CGImage?
-            if model.includeScreenshot, let displayID {
-                background = try? await ScreenCapture.capture(displayID: displayID)
-                if background == nil { model.statusMessage = "Screenshot unavailable; saved ink only" }
-            }
-            do {
-                try SessionArchive.save(strokes, metadata: metadata, to: dir, background: background)
-                model.statusMessage = "Saved \(strokes.count) strokes"
-                NSWorkspace.shared.activateFileViewerSelecting([dir.appendingPathComponent("export.pdf")])
-            } catch {
-                model.statusMessage = "Save failed: \(error.localizedDescription)"
-            }
-        }
+        exporter.saveInteractively()
     }
 
     func openSettings() {
@@ -95,6 +81,8 @@ extension InkCoordinator: ToolbarActions {
         keys.register(kVK_ANSI_O) { [weak self] in self?.toggleOverlay() }
         keys.register(kVK_ANSI_S) { [weak self] in self?.saveSession() }
         keys.register(kVK_ANSI_T) { [weak self] in self?.toggleToolbar() }
+        keys.register(kVK_ANSI_F) { [weak self] in self?.fitAll() }
+        keys.register(kVK_ANSI_0) { [weak self] in self?.homeView() }
     }
 
     // MARK: Persistence
@@ -136,8 +124,10 @@ extension InkCoordinator: ToolbarActions {
     /// Restores the previous session's strokes into the store.
     func restore(sessionID: String) -> Bool {
         let dir = Self.sessionsDirectory.appendingPathComponent(sessionID)
-        guard let (_, strokes) = try? SessionArchive.load(from: dir), !strokes.isEmpty else { return false }
+        guard let (meta, strokes) = try? SessionArchive.load(from: dir), !strokes.isEmpty else { return false }
         store.load(strokes)
+        ingestor.viewport = meta.viewport
+        relayoutOverlay()
         autosavedRevision = store.revision
         overlayView?.needsDisplay = true
         return true

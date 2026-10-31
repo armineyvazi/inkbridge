@@ -1,7 +1,7 @@
 import InkBridgeCore
 import SwiftUI
 
-/// Actions the toolbar can trigger; implemented by `InkCoordinator`.
+/// Actions the toolbar and menus can trigger; implemented by `InkCoordinator`.
 protocol ToolbarActions: AnyObject {
     func undo()
     func redo()
@@ -9,65 +9,150 @@ protocol ToolbarActions: AnyObject {
     func toggleOverlay()
     func saveSession()
     func openSettings()
+    func fitAll()
+    func homeView()
+    func hideToolbar()
 }
 
 /// The floating tool palette.
+///
+/// Three densities, all keeping the essentials (current tool, undo, and the
+/// ••• menu that reaches everything else):
+/// - expanded: status, tools, colours, width, edit, view, save
+/// - compact: tools, colour menu, undo/redo, save
+/// - minimal: tool menu, undo
+/// Docked left or right it lays out vertically.
 struct ToolbarView: View {
     @ObservedObject var model: AppModel
     weak var actions: ToolbarActions?
 
+    private var vertical: Bool { model.toolbarDock.isVertical }
+    private var stack: AnyLayout { vertical ? AnyLayout(VStackLayout(spacing: 6)) : AnyLayout(HStackLayout(spacing: 8)) }
+
     var body: some View {
-        HStack(spacing: 10) {
-            StatusBadge(model: model)
-            Divider().frame(height: 22)
-            toolButtons
-            Divider().frame(height: 22)
-            colorSwatches
-            widthSlider
-            Divider().frame(height: 22)
-            editButtons
+        stack {
+            switch model.toolbarSize {
+            case .expanded: expanded
+            case .compact: compact
+            case .minimal: minimal
+            }
+            moreMenu
         }
-        .padding(.horizontal, 12)
-        .padding(.vertical, 8)
+        .padding(.horizontal, vertical ? 6 : 10)
+        .padding(.vertical, vertical ? 10 : 6)
         .background(VisualEffectBackground())
         .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
         .overlay(RoundedRectangle(cornerRadius: 12, style: .continuous).strokeBorder(.white.opacity(0.12)))
         .fixedSize()
     }
 
+    // MARK: Sizes
+
+    @ViewBuilder private var expanded: some View {
+        if !vertical { StatusBadge(model: model); separator }
+        toolButtons
+        separator
+        colorSwatches
+        if !vertical { widthSlider }
+        separator
+        iconButton("arrow.uturn.backward", "Undo (⌃⌥Z)", enabled: model.canUndo) { actions?.undo() }
+        iconButton("arrow.uturn.forward", "Redo (⌃⌥⇧Z)", enabled: model.canRedo) { actions?.redo() }
+        iconButton("trash", "Clear canvas (⌃⌥C) — undoable; saved sessions are kept") { actions?.clear() }
+        separator
+        iconButton("arrow.up.left.and.arrow.down.right", "Fit all ink (⌃⌥F)") { actions?.fitAll() }
+        iconButton("house", "Home view, 1:1 with the screen (⌃⌥0)") { actions?.homeView() }
+        iconButton(model.overlayVisible ? "eye" : "eye.slash", "Hide/show ink (⌃⌥O)") { actions?.toggleOverlay() }
+        iconButton("square.and.arrow.down", "Save… (⌃⌥S)") { actions?.saveSession() }
+    }
+
+    @ViewBuilder private var compact: some View {
+        statusDot
+        toolButtons
+        colorMenu
+        iconButton("arrow.uturn.backward", "Undo (⌃⌥Z)", enabled: model.canUndo) { actions?.undo() }
+        iconButton("arrow.uturn.forward", "Redo (⌃⌥⇧Z)", enabled: model.canRedo) { actions?.redo() }
+        iconButton("square.and.arrow.down", "Save… (⌃⌥S)") { actions?.saveSession() }
+    }
+
+    @ViewBuilder private var minimal: some View {
+        statusDot
+        Menu {
+            ForEach(Tool.allCases, id: \.self) { t in
+                Button { model.tool = t } label: { Label(Self.toolTitle(t), systemImage: Self.toolSymbol(t)) }
+            }
+        } label: {
+            Image(systemName: Self.toolSymbol(model.tool)).frame(width: 26, height: 26)
+        }
+        .menuStyle(.borderlessButton)
+        .menuIndicator(.hidden)
+        .fixedSize()
+        .help("Tool")
+        iconButton("arrow.uturn.backward", "Undo (⌃⌥Z)", enabled: model.canUndo) { actions?.undo() }
+    }
+
+    // MARK: Pieces
+
+    private var separator: some View {
+        Rectangle().fill(.primary.opacity(0.15))
+            .frame(width: vertical ? 22 : 1, height: vertical ? 1 : 22)
+    }
+
+    private var statusDot: some View {
+        Circle().fill(model.connection.isConnected ? Color.green : Color.orange)
+            .frame(width: 7, height: 7)
+            .help(model.connection.isConnected ? "Connected: \(model.connection.deviceName ?? "")" : "Waiting for the tablet")
+    }
+
     private var toolButtons: some View {
-        HStack(spacing: 2) {
-            toolButton(.pen, "pencil.tip", "Pen (⌃⌥P)")
-            toolButton(.highlighter, "highlighter", "Highlighter (⌃⌥H)")
-            toolButton(.eraser, "eraser", "Eraser (⌃⌥E)")
-            toolButton(.laser, "cursorarrow.rays", "Laser pointer (⌃⌥L)")
-        }
-    }
-
-    private func toolButton(_ tool: Tool, _ symbol: String, _ help: String) -> some View {
-        Button { model.tool = tool } label: {
-            Image(systemName: symbol)
-                .frame(width: 28, height: 26)
-                .background(model.tool == tool ? Color.accentColor.opacity(0.25) : .clear)
-                .clipShape(RoundedRectangle(cornerRadius: 6))
-        }
-        .buttonStyle(.plain)
-        .help(help)
-    }
-
-    @ViewBuilder private var colorSwatches: some View {
-        let palette = model.tool == .highlighter ? AppModel.highlighterPalette : AppModel.palette
-        HStack(spacing: 5) {
-            ForEach(palette, id: \.self) { c in
-                Circle()
-                    .fill(Color(nsColor: c.nsColor))
-                    .frame(width: 16, height: 16)
-                    .overlay(Circle().strokeBorder(.primary.opacity(model.activeColor == c ? 0.9 : 0.2), lineWidth: model.activeColor == c ? 2 : 1))
-                    .onTapGesture { model.setColor(c) }
+        let layout = vertical ? AnyLayout(VStackLayout(spacing: 2)) : AnyLayout(HStackLayout(spacing: 2))
+        return layout {
+            ForEach(Tool.allCases, id: \.self) { t in
+                Button { model.tool = t } label: {
+                    Image(systemName: Self.toolSymbol(t))
+                        .frame(width: 28, height: 26)
+                        .background(model.tool == t ? Color.accentColor.opacity(0.25) : .clear)
+                        .clipShape(RoundedRectangle(cornerRadius: 6))
+                }
+                .buttonStyle(.plain)
+                .help("\(Self.toolTitle(t)) (⌃⌥\(Self.toolKey(t)))")
             }
         }
-        .opacity(model.tool == .eraser || model.tool == .laser ? 0.35 : 1)
-        .disabled(model.tool == .eraser || model.tool == .laser)
+    }
+
+    private var palette: [RGBA] { model.tool == .highlighter ? AppModel.highlighterPalette : AppModel.palette }
+    private var colorsDisabled: Bool { model.tool == .eraser || model.tool == .laser }
+
+    @ViewBuilder private var colorSwatches: some View {
+        let layout = vertical ? AnyLayout(VStackLayout(spacing: 5)) : AnyLayout(HStackLayout(spacing: 5))
+        layout {
+            ForEach(palette, id: \.self) { c in
+                swatch(c, selected: model.activeColor == c).onTapGesture { model.setColor(c) }
+            }
+        }
+        .opacity(colorsDisabled ? 0.35 : 1)
+        .disabled(colorsDisabled)
+    }
+
+    private var colorMenu: some View {
+        Menu {
+            ForEach(palette, id: \.self) { c in
+                Button { model.setColor(c) } label: { Text(Self.colorName(c)) }
+            }
+        } label: {
+            swatch(model.activeColor, selected: true)
+        }
+        .menuStyle(.borderlessButton)
+        .menuIndicator(.hidden)
+        .fixedSize()
+        .disabled(colorsDisabled)
+        .help("Colour")
+    }
+
+    private func swatch(_ c: RGBA, selected: Bool) -> some View {
+        Circle()
+            .fill(Color(nsColor: c.nsColor))
+            .frame(width: 16, height: 16)
+            .overlay(Circle().strokeBorder(.primary.opacity(selected ? 0.9 : 0.2), lineWidth: selected ? 2 : 1))
     }
 
     @ViewBuilder private var widthSlider: some View {
@@ -83,15 +168,39 @@ struct ToolbarView: View {
         }
     }
 
-    private var editButtons: some View {
-        HStack(spacing: 2) {
-            iconButton("arrow.uturn.backward", "Undo (⌃⌥Z)", enabled: model.canUndo) { actions?.undo() }
-            iconButton("arrow.uturn.forward", "Redo (⌃⌥⇧Z)", enabled: model.canRedo) { actions?.redo() }
-            iconButton("trash", "Clear screen (⌃⌥C) — undoable") { actions?.clear() }
-            iconButton(model.overlayVisible ? "eye" : "eye.slash", "Hide/show ink (⌃⌥O)") { actions?.toggleOverlay() }
-            iconButton("square.and.arrow.down", "Save session (⌃⌥S)") { actions?.saveSession() }
-            iconButton("gearshape", "Settings") { actions?.openSettings() }
+    /// Everything not on the bar at the current size, plus layout controls.
+    private var moreMenu: some View {
+        Menu {
+            Picker("Size", selection: $model.toolbarSize) {
+                ForEach(ToolbarSize.allCases) { Text($0.title).tag($0) }
+            }
+            Picker("Position", selection: $model.toolbarDock) {
+                ForEach(ToolbarDock.allCases) { Text($0.title).tag($0) }
+            }
+            Divider()
+            if model.toolbarSize != .expanded {
+                Button("Redo") { actions?.redo() }.disabled(!model.canRedo)
+                Button("Clear canvas") { actions?.clear() }
+                Button(model.overlayVisible ? "Hide ink" : "Show ink") { actions?.toggleOverlay() }
+            }
+            if model.toolbarSize == .minimal { Button("Save…") { actions?.saveSession() } }
+            Button("Fit all ink") { actions?.fitAll() }
+            Button("Home view") { actions?.homeView() }
+            if model.tool == .highlighter {
+                Picker("Highlighter opacity", selection: $model.highlighterOpacity) {
+                    ForEach([0.2, 0.35, 0.5, 0.7], id: \.self) { Text("\(Int($0 * 100)) %").tag($0) }
+                }
+            }
+            Divider()
+            Button("Settings…") { actions?.openSettings() }
+            Button("Hide toolbar (⌃⌥T)") { actions?.hideToolbar() }
+        } label: {
+            Image(systemName: "ellipsis.circle").frame(width: 26, height: 26)
         }
+        .menuStyle(.borderlessButton)
+        .menuIndicator(.hidden)
+        .fixedSize()
+        .help("More: size, position, view, settings, hide")
     }
 
     private func iconButton(_ symbol: String, _ help: String, enabled: Bool = true, _ action: @escaping () -> Void) -> some View {
@@ -100,6 +209,40 @@ struct ToolbarView: View {
             .disabled(!enabled)
             .opacity(enabled ? 1 : 0.35)
             .help(help)
+    }
+
+    static func toolSymbol(_ t: Tool) -> String {
+        switch t {
+        case .pen: return "pencil.tip"
+        case .highlighter: return "highlighter"
+        case .eraser: return "eraser"
+        case .laser: return "cursorarrow.rays"
+        }
+    }
+
+    static func toolTitle(_ t: Tool) -> String {
+        t == .laser ? "Laser pointer" : t.rawValue.capitalized
+    }
+
+    static func toolKey(_ t: Tool) -> String {
+        switch t {
+        case .pen: return "P"
+        case .highlighter: return "H"
+        case .eraser: return "E"
+        case .laser: return "L"
+        }
+    }
+
+    static func colorName(_ c: RGBA) -> String {
+        switch c {
+        case .red: return "Red"
+        case .blue: return "Blue"
+        case .green: return "Green"
+        case .black: return "Black"
+        case .white: return "White"
+        case .yellow: return "Yellow"
+        default: return c.hex
+        }
     }
 }
 
@@ -126,7 +269,9 @@ private struct StatusBadge: View {
 
     private var title: String {
         guard model.connection.isConnected else { return "Waiting for BOOX" }
-        return model.connection.transport == .usb ? "USB" : "Wi-Fi"
+        let zoom = model.viewport.zoom
+        let via = model.connection.transport == .usb ? "USB" : "Wi-Fi"
+        return abs(zoom - 1) < 0.01 ? via : "\(via) · \(Int((zoom * 100).rounded())) %"
     }
 
     private var subtitle: String {
@@ -138,7 +283,7 @@ private struct StatusBadge: View {
     }
 }
 
-private struct VisualEffectBackground: NSViewRepresentable {
+struct VisualEffectBackground: NSViewRepresentable {
     func makeNSView(context: Context) -> NSVisualEffectView {
         let v = NSVisualEffectView()
         v.material = .hudWindow
@@ -166,7 +311,6 @@ final class ToolbarPanel: NSPanel {
         level = NSWindow.Level(rawValue: NSWindow.Level.screenSaver.rawValue + 1)
         collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .stationary]
         contentView = content
-        setFrameAutosaveName("InkBridgeToolbar")
     }
 
     override var canBecomeKey: Bool { true }

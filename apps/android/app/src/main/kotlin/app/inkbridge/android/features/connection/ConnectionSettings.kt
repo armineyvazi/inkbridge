@@ -14,11 +14,10 @@ data class ConnectionSettings(
     val usbPort: Int = DEFAULT_USB_PORT,
     val pairingCode: String = "",
     /**
-     * Off by default: drawing ink on the e-ink panel blocks the UI thread and
-     * delays pen events. Measured on a Note Air 2 Plus over USB, pen→Mac p95
-     * was 59 ms with local ink and 16 ms without.
+     * Ink on the tablet. On by default since the renderer moved off the UI
+     * thread; the old UI-thread renderer raised pen→Mac p95 from 16 to 59 ms.
      */
-    val showLocalInk: Boolean = false,
+    val showLocalInk: Boolean = true,
 ) {
     companion object {
         private const val PREFS = "inkbridge"
@@ -31,7 +30,7 @@ data class ConnectionSettings(
                 wifiPort = p.getInt("wifiPort", DEFAULT_WIFI_PORT),
                 usbPort = p.getInt("usbPort", DEFAULT_USB_PORT),
                 pairingCode = p.getString("pairingCode", "")!!,
-                showLocalInk = p.getBoolean("showLocalInk", false),
+                showLocalInk = p.getBoolean("showLocalInk", true),
             )
         }
 

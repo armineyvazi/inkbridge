@@ -45,7 +45,7 @@ object SettingsDialog {
             inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_FLAG_CAP_CHARACTERS
         }
         val discoveryStatus = TextView(context).apply { text = "Searching for Macs on this network…" }
-        val ink = CheckBox(context).apply { text = "Also show ink on the tablet (slower: adds latency on e-ink)"; isChecked = current.showLocalInk }
+        val ink = CheckBox(context).apply { text = "Show ink on the tablet"; isChecked = current.showLocalInk }
 
         root.addView(group)
         root.addView(TextView(context).apply { text = "\nWi-Fi" })

@@ -2,28 +2,31 @@ import AppKit
 import Combine
 import InkBridgeCore
 import os
-import SwiftUI
 
-/// Wires the server, the drawing engine and the windows together.
+/// Wires the server, the drawing engine, document sync and the windows.
 ///
-/// Data flow: InkServer (socket queue) → delegate on main → PeerArbiter
-/// decides whether the peer is active → StrokeIngestor mutates StrokeStore →
-/// OverlayView invalidates the touched rect. Nothing here touches sockets
-/// directly or knows which transport delivered a message.
+/// Inbound: InkServer (socket queue) → delegate on main → PeerArbiter decides
+/// whether the peer is active → StrokeIngestor mutates StrokeStore →
+/// OverlayView invalidates the touched rect.
+///
+/// Outbound (ADR-006): after every document change `DocumentSync` computes
+/// what the active tablet is missing or must drop, and only that is sent.
 final class InkCoordinator: NSObject {
     let model: AppModel
     let store = StrokeStore()
     private(set) lazy var ingestor = StrokeIngestor(store: store)
     private var arbiter: PeerArbiter
     private var peers: [UUID: PeerInfo] = [:]
+    private var sync = DocumentSync()
     let server: InkServer
     let sessionID: String
     let sessionStarted = Date()
-    private let log = Logger(subsystem: "app.inkbridge", category: "coordinator")
+    let log = Logger(subsystem: "app.inkbridge", category: "coordinator")
 
     private var overlayWindow: OverlayWindow?
     private(set) var overlayView: OverlayView!
-    private var toolbar: ToolbarPanel?
+    private(set) var toolbar: ToolbarController!
+    private(set) lazy var exporter = ExportController(coordinator: self)
     var settingsWindow: NSWindow?
     let hotKeys = HotKeyCenter()
     private var bag = Set<AnyCancellable>()
@@ -60,11 +63,11 @@ final class InkCoordinator: NSObject {
     func start() {
         ingestor.resolveTool = { [weak self] tool in
             guard let self else { return (tool, StrokeStyle(color: .black, width: 3, pressureSensitive: true)) }
-            let pressure = self.activePeer?.hello.capabilities.pressure ?? true
-            return self.model.resolve(tool, devicePressure: pressure)
+            return self.resolveInCanvasUnits(tool)
         }
         buildOverlay()
-        buildToolbar()
+        toolbar = ToolbarController(model: model, actions: self)
+        toolbar.start(on: DisplayManager.screen(for: model.displayID))
         registerHotKeys()
         observeModel()
         server.start()
@@ -78,9 +81,18 @@ final class InkCoordinator: NSObject {
         server.stop()
     }
 
-    private var activePeer: PeerInfo? { arbiter.activeID.flatMap { peers[$0] } }
+    var activePeer: PeerInfo? { arbiter.activeID.flatMap { peers[$0] } }
 
-    // MARK: Windows
+    /// Toolbar widths are on-screen points; stored strokes use canvas px, so a
+    /// line looks as thick as selected at the current zoom and scales after.
+    private func resolveInCanvasUnits(_ tool: Tool) -> (Tool, StrokeStyle) {
+        let pressure = activePeer?.hello.capabilities.pressure ?? true
+        var (resolved, style) = model.resolve(tool, devicePressure: pressure)
+        style.width /= max(overlayView.mapper.scale, 1e-6)
+        return (resolved, style)
+    }
+
+    // MARK: Overlay
 
     private func buildOverlay() {
         guard let screen = DisplayManager.screen(for: model.displayID) else { return }
@@ -88,11 +100,11 @@ final class InkCoordinator: NSObject {
         overlayView.onDraw = { [weak self] ns in self?.didDraw(at: ns) }
         overlayWindow = OverlayWindow(screen: screen, content: overlayView)
         overlayWindow?.orderFrontRegardless()
-        store.aspectRatio = overlayView.mapper.aspectRatio
+        updateEraserRadius()
     }
 
     private func mapper(for screen: NSScreen) -> CoordinateMapper {
-        CoordinateMapper(canvas: screen.frame.size, surface: ingestor.surface, fit: model.fit)
+        CoordinateMapper(canvas: screen.frame.size, surface: ingestor.surface, viewport: ingestor.viewport, fit: model.fit)
     }
 
     @objc private func screensChanged() {
@@ -103,32 +115,16 @@ final class InkCoordinator: NSObject {
         guard let screen = DisplayManager.screen(for: model.displayID), let overlayWindow else { return }
         overlayWindow.move(to: screen)
         overlayView.mapper = mapper(for: screen)
-        store.aspectRatio = overlayView.mapper.aspectRatio
-        placeToolbarIfOffscreen(on: screen)
+        model.viewport = ingestor.viewport
+        updateEraserRadius()
+        toolbar?.screenChanged(DisplayManager.screen(for: model.displayID))
     }
 
-    private func buildToolbar() {
-        let host = NSHostingView(rootView: ToolbarView(model: model, actions: self))
-        let panel = ToolbarPanel(content: host)
-        panel.setContentSize(host.fittingSize)
-        if let screen = DisplayManager.screen(for: model.displayID) { placeToolbarIfOffscreen(on: screen, panel: panel) }
-        panel.orderFrontRegardless()
-        toolbar = panel
+    /// The eraser size is a fraction of the display height; convert to canvas px.
+    private func updateEraserRadius() {
+        guard let overlayView else { return }
+        store.eraserRadius = model.eraserRadius * Double(overlayView.mapper.canvas.height) / max(overlayView.mapper.scale, 1e-6)
     }
-
-    private func placeToolbarIfOffscreen(on screen: NSScreen, panel: ToolbarPanel? = nil) {
-        guard let panel = panel ?? toolbar else { return }
-        if NSScreen.screens.contains(where: { $0.visibleFrame.intersects(panel.frame) }) && panel.frame.origin != .zero { return }
-        let f = screen.visibleFrame
-        panel.setFrameOrigin(NSPoint(x: f.midX - panel.frame.width / 2, y: f.minY + 24))
-    }
-
-    func toggleToolbar() {
-        guard let toolbar else { return }
-        toolbar.isVisible ? toolbar.orderOut(nil) : toolbar.orderFrontRegardless()
-    }
-
-    var isToolbarVisible: Bool { toolbar?.isVisible ?? false }
 
     // MARK: Model observation
 
@@ -141,12 +137,7 @@ final class InkCoordinator: NSObject {
         }.store(in: &bag)
         model.$fit.dropFirst().receive(on: RunLoop.main).sink { [weak self] _ in self?.relayoutOverlay() }.store(in: &bag)
         model.$displayID.dropFirst().receive(on: RunLoop.main).sink { [weak self] _ in self?.relayoutOverlay() }.store(in: &bag)
-        model.$eraserRadius.sink { [weak self] r in self?.store.eraserRadius = r }.store(in: &bag)
-        // The toolbar changes width with the selected tool's controls.
-        model.$tool.receive(on: RunLoop.main).sink { [weak self] _ in
-            guard let toolbar = self?.toolbar, let content = toolbar.contentView else { return }
-            toolbar.setContentSize(content.fittingSize)
-        }.store(in: &bag)
+        model.$eraserRadius.dropFirst().receive(on: RunLoop.main).sink { [weak self] _ in self?.updateEraserRadius() }.store(in: &bag)
     }
 
     func refreshEditState() {
@@ -154,9 +145,28 @@ final class InkCoordinator: NSObject {
         model.canRedo = store.canRedo
     }
 
-    private func flash(_ message: String) {
-        model.statusMessage = message
-        log.info("\(message, privacy: .public)")
+    // MARK: Document sync (host → tablet)
+
+    /// Sends the active tablet whatever changed in the document.
+    func syncDocument() {
+        guard let peer = activePeer else { return }
+        send(sync.diff(store.strokes), to: peer)
+    }
+
+    /// Moves the shared view (Mac-side Fit all / Home) and tells the tablet.
+    func setViewport(_ viewport: Viewport) {
+        ingestor.viewport = viewport
+        relayoutOverlay()
+        if let peer = activePeer { server.send(.canvasViewport(viewport), to: peer.id) }
+    }
+
+    func fitAll() {
+        guard let bounds = store.contentBounds else { return setViewport(.home) }
+        setViewport(.fitting(bounds, in: ingestor.surface))
+    }
+
+    private func send(_ payloads: [Payload], to peer: PeerInfo) {
+        for p in payloads { server.send(p, to: peer.id) }
     }
 }
 
@@ -174,7 +184,9 @@ extension InkCoordinator: InkServerDelegate {
     func inkServer(_ server: InkServer, peer: PeerInfo, didReceive message: Message, receivedAtNs: Int64) {
         guard arbiter.isActive(peer.id) else { return }
         recordInputLatency(message, receivedAt: receivedAtNs)
-        switch ingestor.handle(message, streamID: peer.hello.streamID) {
+        let change = ingestor.handle(message, streamID: peer.hello.streamID)
+        followUp(message, change: change, peer: peer)
+        switch change {
         case .none:
             break
         case let .strokeUpdated(id, added):
@@ -184,8 +196,25 @@ extension InkCoordinator: InkServerDelegate {
             pendingReceiveNs = pendingReceiveNs ?? receivedAtNs
             overlayView.needsDisplay = true
             refreshEditState()
-        case .surfaceChanged:
+            syncDocument()
+        case .surfaceChanged, .viewportChanged:
             relayoutOverlay()
+        }
+    }
+
+    /// Per-message replies to the tablet that keep its mirror correct.
+    private func followUp(_ message: Message, change: StrokeIngestor.Change, peer: PeerInfo) {
+        switch message.payload {
+        case let .strokeBegin(id, _, _, _):
+            // Tell the tablet how the Mac resolved its stroke (highlighter, laser, eraser…).
+            if let s = store.active[id] {
+                server.send(.strokeStyle(strokeID: id, tool: s.tool, style: WireStyle(color: s.style.color, width: s.style.width)), to: peer.id)
+            }
+        case let .strokeEnd(id):
+            // The tablet already has its own stroke; diff only reports it if the Mac dropped it.
+            sync.markKnown(id)
+        default:
+            break
         }
     }
 
@@ -211,20 +240,23 @@ extension InkCoordinator: InkServerDelegate {
         if case .failed(let e) = state { model.connection.lastError = "\(listener.rawValue) listener failed: \(e)" }
     }
 
-    /// Strokes in progress belong to the old link; finish them so nothing dangles.
+    /// Strokes in progress belong to the old link: finish them, then give the
+    /// new tablet the whole document once. Later changes go out as diffs.
     private func activePeerChanged() {
         store.endAll()
         overlayView.needsDisplay = true
         refreshEditState()
         clock.reset()
         inputLatency.reset()
+        sync.reset()
         let peer = activePeer
         model.connection.deviceName = peer?.hello.deviceName
         model.connection.transport = peer?.kind
         model.rttMs = nil
         model.inputLatencyMs = nil
         if let peer {
-            _ = ingestor.setSurface(CGSize(width: peer.hello.surfaceWidthPx, height: peer.hello.surfaceHeightPx))
+            ingestor.setSurface(CGSize(width: peer.hello.surfaceWidthPx, height: peer.hello.surfaceHeightPx))
+            send(sync.resync(store.strokes), to: peer)
         }
         relayoutOverlay()
     }
@@ -251,6 +283,7 @@ extension InkCoordinator: InkServerDelegate {
     func diagnosticReport() -> String {
         func f(_ v: Double?) -> String { v.map { String(format: "%.2f", $0) } ?? "n/a" }
         let info = Bundle.main.infoDictionary
+        let v = ingestor.viewport
         return """
         InkBridge diagnostic report
         generated: \(ISO8601DateFormatter().string(from: Date()))
@@ -269,7 +302,8 @@ extension InkCoordinator: InkServerDelegate {
         pen→mac ms p50/p95: \(f(inputLatency.percentile(0.5))) / \(f(inputLatency.percentile(0.95))) (n=\(inputLatency.count))
         receive→draw ms p50/p95: \(f(renderLatency.percentile(0.5))) / \(f(renderLatency.percentile(0.95))) (n=\(renderLatency.count))
         duplicate/stale messages dropped: \(ingestor.droppedCount)
-        strokes: \(store.strokes.count) committed, \(store.active.count) active
+        strokes: \(store.strokes.count) committed, \(store.active.count) active, tablet mirror \(sync.known.count)
+        viewport: x=\(f(v.x)) y=\(f(v.y)) zoom=\(f(v.zoom))
         displays: \(DisplayManager.displays.map { "\($0.name) \(Int($0.size.width))x\(Int($0.size.height))" }.joined(separator: "; "))
 
         """

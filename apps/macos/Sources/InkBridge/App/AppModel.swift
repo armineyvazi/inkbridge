@@ -6,6 +6,21 @@ import InkBridgeCore
 ///
 /// Persisted preferences are mirrored into UserDefaults; everything else is
 /// runtime state published by `InkCoordinator`.
+/// Toolbar density. Every size keeps the essentials (tool, undo, menu).
+enum ToolbarSize: String, CaseIterable, Identifiable {
+    case expanded, compact, minimal
+    var id: String { rawValue }
+    var title: String { rawValue.capitalized }
+}
+
+/// Where the toolbar sits. Left/right dock vertically.
+enum ToolbarDock: String, CaseIterable, Identifiable {
+    case bottom, top, left, right, floating
+    var id: String { rawValue }
+    var title: String { self == .floating ? "Where I drag it" : rawValue.capitalized }
+    var isVertical: Bool { self == .left || self == .right }
+}
+
 final class AppModel: ObservableObject {
     struct Connection: Equatable {
         var deviceName: String?
@@ -47,6 +62,14 @@ final class AppModel: ObservableObject {
         didSet { defaults.set(displayID.map { Int($0) }, forKey: "displayID") }
     }
     @Published var includeScreenshot: Bool { didSet { defaults.set(includeScreenshot, forKey: "includeScreenshot") } }
+    @Published var fullPageFormat: ExportOptions.ImageFormat {
+        didSet { defaults.set(fullPageFormat.rawValue, forKey: "fullPageFormat") }
+    }
+    @Published var toolbarSize: ToolbarSize { didSet { defaults.set(toolbarSize.rawValue, forKey: "toolbarSize") } }
+    @Published var toolbarDock: ToolbarDock { didSet { defaults.set(toolbarDock.rawValue, forKey: "toolbarDock") } }
+    @Published var toolbarVisible: Bool { didSet { defaults.set(toolbarVisible, forKey: "toolbarVisible") } }
+    /// The view of the infinite canvas currently shown (mirrors the tablet).
+    @Published var viewport: Viewport = .home
 
     private let defaults: UserDefaults
 
@@ -58,6 +81,10 @@ final class AppModel: ObservableObject {
         fit = CoordinateMapper.Fit(rawValue: defaults.string(forKey: "fit") ?? "") ?? .aspectFit
         displayID = (defaults.object(forKey: "displayID") as? Int).map { CGDirectDisplayID($0) }
         includeScreenshot = defaults.bool(forKey: "includeScreenshot")
+        fullPageFormat = ExportOptions.ImageFormat(rawValue: defaults.string(forKey: "fullPageFormat") ?? "") ?? .png
+        toolbarSize = ToolbarSize(rawValue: defaults.string(forKey: "toolbarSize") ?? "") ?? .expanded
+        toolbarDock = ToolbarDock(rawValue: defaults.string(forKey: "toolbarDock") ?? "") ?? .bottom
+        toolbarVisible = defaults.object(forKey: "toolbarVisible") as? Bool ?? true
         defaults.set(pairingCode, forKey: "pairingCode")
     }
 
@@ -66,6 +93,8 @@ final class AppModel: ObservableObject {
 
     /// The tool and style for a new stroke, given the device's physical tool.
     /// The device eraser always erases; otherwise the toolbar selection wins.
+    /// Widths here are display points at the current zoom; the coordinator
+    /// converts them to canvas px.
     func resolve(_ deviceTool: Tool, devicePressure: Bool) -> (Tool, StrokeStyle) {
         let tool = deviceTool == .eraser ? .eraser : self.tool
         switch tool {
