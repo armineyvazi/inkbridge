@@ -1,66 +1,85 @@
 # Coordinate mapping
 
-Four coordinate spaces, and the code that converts between each pair:
+Four coordinate spaces ([ADR-006](../decisions/ADR-006-infinite-canvas-and-sync.md)).
+Only **canvas px** are ever stored.
 
 ```mermaid
 flowchart LR
-  A["Tablet view px<br/>(origin top-left, current orientation)"] -->|CoordinateNormalizer<br/>÷ width, ÷ height, clamp, round 1e-5| B["Normalized 0..1<br/>(on the wire)"]
-  B -->|CoordinateMapper.calibration<br/>(x − ox)·sx, (y − oy)·sy| C["Calibrated 0..1"]
-  C -->|CoordinateMapper.activeRect<br/>aspect fit or stretch| D["Overlay points<br/>(AppKit, top-left, flipped view)"]
-  D -->|window server × backingScaleFactor| E["Display pixels"]
+  A["1 · Stylus input<br/>tablet view px"] -->|"StrokeProcessor<br/>canvas = viewport.origin + px / zoom"| B["2 · Canvas px<br/>(stored · unbounded · isotropic)"]
+  B -->|"3 · Viewport {x, y, zoom}<br/>visible rect = origin, surface / zoom"| C["view-normalized 0..1"]
+  C -->|"calibration, aspect fit"| D["4 · Mac display points"]
+  D -->|"× backingScaleFactor"| E["display pixels"]
 ```
 
-## 1. Tablet: px → normalized (Android)
+| Space | Unit | Code | Stored? |
+|---|---|---|---|
+| Stylus input | tablet view px, top-left of the drawing view | `MotionEvent` → `RawSample` | no |
+| **Canvas** | **canvas px**: 1 = 1 tablet px at zoom 1; y down; unbounded | `InkPoint` (Kotlin + Swift) | **yes** |
+| Viewport | canvas point at the view's top-left, plus `zoom` (view px per canvas px) | `Viewport` (both sides) | session metadata only |
+| Mac display | AppKit points on the selected display, top-left | `CoordinateMapper` | no |
 
-`x_n = clamp(x / viewWidth, 0, 1)`, and likewise for y. The reference is the **drawing
-view**, not the physical panel. The status bar and the app's top bar are excluded, so
-the whole visible drawing area maps to the whole target. Rotation changes the view
-size, and the tablet sends `device.surface`. The digitizer's own coordinate space is
-already mapped to view pixels by Android.
+## 1. Input → canvas (tablet)
 
-## 2. Calibration (Mac)
+`StrokeProcessor` reads the current `viewport` for every sample:
 
-`Calibration { offsetX, offsetY, scaleX, scaleY }`, identity by default, applied in
-normalized space. It corrects a consistent offset or scale error, and is persisted
-with each session. **A calibration wizard (tap four targets, solve for the transform)
-is not implemented yet.** The data model and the mapping are in place and tested.
-A four-point solve would also give rotation and shear; that would mean extending
-`Calibration` to a full 2×3 affine transform.
+```
+canvasX = viewport.x + viewX / viewport.zoom
+canvasY = viewport.y + viewY / viewport.zoom
+```
 
-## 3. Fitting to the display (Mac)
+Values are rounded to 0.01 canvas px. Because canvas px are isotropic (the same unit
+on both axes), **rotating the tablet cannot distort existing strokes**, which v1's
+per-axis normalization could.
 
-The target canvas is the selected display's frame, in points.
+## 2. Viewport (both sides, kept in sync)
 
-- **Aspect fit** (default): `scale = min(W/w, H/h)`, centered. Shapes keep their
-  proportions: a circle drawn on the tablet stays a circle. A portrait Note Air 3
-  (1404 × 1872, 3:4) on a 16:10 display maps to a centred band using the full height.
-  Rotate the tablet to landscape to cover most of the screen.
-- **Stretch**: the tablet fills the whole display, and shapes distort by the ratio of
-  the two aspect ratios.
+- Home view `{0, 0, 1}`: canvas px = tablet px, so the Mac overlay lines up 1:1 with
+  the screen, exactly as before.
+- Zoom: `zoomedBy(factor, focus)` keeps the canvas point under the fingers (or the view
+  centre) fixed. Zoom is clamped to 0.02 … 50.
+- Pan: `pannedBy(dx, dy)` moves the content with the finger.
+- Fit all: `fitting(contentBounds, viewSize, margin 5 %)`.
+- The tablet is the usual source of view changes. The Mac follows through
+  `canvas.viewport`. Mac-side *Fit all* and *Home* send the new view back. Last writer
+  wins.
 
-`activeRect` is the canvas region in use. Out-of-range points clamp to it.
+Zooming and panning **never modify stroke data**. They change only the mapping, so
+there's nothing to corrupt (tested: `testZoomingOutShowsMoreCanvasWithoutChangingStrokeData`,
+`testPanningMovesTheViewNotTheInk`).
 
-## 4. Points → pixels
+## 3. Canvas → Mac display
 
-The overlay draws in AppKit **points**, and the window server applies the display's
-`backingScaleFactor`, so Retina needs no special handling. The committed-ink cache is
-rendered at `backingScaleFactor` so it stays sharp.
+```
+visible = (viewport.x, viewport.y, surface.w / zoom, surface.h / zoom)     // canvas px
+u = (canvasX − visible.x) / visible.w,  v = (canvasY − visible.y) / visible.h
+u' = (u − cal.offsetX) · cal.scaleX,     v' = (v − cal.offsetY) · cal.scaleY
+display = activeRect.origin + (u', v') · activeRect.size
+```
+
+- `activeRect` is the tablet view aspect-fitted (default) or stretched onto the
+  selected display.
+- `scale` (display points per canvas px) converts stroke widths, so ink thins when you
+  zoom out, like a real page.
+- Points are **not clamped**: off-screen ink is simply culled.
+- `unmap` is the exact inverse (tested).
+
+The full transform is written into every export as `session/coordinate-mapping.json`,
+so other tools can place the strokes on the full-page image.
+
+## Widths
+
+The toolbar width is chosen in **on-screen points**. A new stroke stores
+`width / scale` canvas px, so it looks exactly as thick as chosen at the zoom it was
+drawn at, and scales consistently afterwards.
 
 ## Multiple displays
 
-- Settings → *Draw on* lists every `NSScreen` with its stable `CGDirectDisplayID`.
-- The overlay window is placed on that screen's `frame`. Each screen has its own
-  points coordinate space, so no global desktop arithmetic is needed.
-- On `didChangeScreenParametersNotification` (plug or unplug, resolution change,
-  arrangement change) the overlay is moved and the mapper rebuilt. Because strokes are
-  normalized, **existing ink remaps** to the new size instead of being lost or cropped.
-- If the selected display disappears, InkBridge falls back to the main display.
+Unchanged from v1. The overlay sits on the chosen `NSScreen`, and the mapper is
+rebuilt on display changes. Since strokes are canvas px, nothing is lost when a
+display changes size or disappears.
 
-Rotated external displays need nothing special: AppKit reports the rotated frame.
-This has **not been hardware tested**.
+## Calibration
 
-## Tests
-
-`CoordinateMapperTests`: stretch corners, portrait-on-landscape letterbox, landscape
-fit, clamping, calibration. `CoordinateNormalizerTest`: normalize, clamp, rounding,
-resize on rotation.
+The `Calibration` (offset and scale in view-normalized space) is applied after the
+viewport, so it corrects the physical alignment at every zoom level. The 4-point wizard
+is still not implemented.

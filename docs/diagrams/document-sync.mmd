@@ -1,0 +1,28 @@
+%% Protocol v2 document sync (ADR-006): the Mac owns the document, the tablet mirrors it.
+sequenceDiagram
+  autonumber
+  participant P as Pen
+  participant T as Tablet (CanvasDocument + renderer)
+  participant H as Mac (StrokeStore + DocumentSync)
+
+  Note over T,H: connect / reconnect
+  T->>H: canvas.viewport {x, y, zoom}
+  H->>T: doc.reset
+  H->>T: stroke.begin(style) / stroke.point / stroke.end × every stroke
+  Note over T: keeps strokes it had not finished sending (outage drawing)
+
+  Note over T,H: drawing
+  P->>T: MotionEvent
+  T->>T: draw segment locally (render thread, dirty rect only)
+  T->>H: stroke.begin / stroke.point / stroke.end (canvas px)
+  H->>T: stroke.style {tool, colour, width}
+  Note over H: markKnown(id): the tablet already has it
+
+  Note over T,H: editing (either side)
+  T->>H: canvas.command {undo | redo | clear}
+  H->>H: StrokeStore applies; DocumentSync.diff(ids)
+  H->>T: doc.remove {ids}  and/or  stroke.* for strokes the tablet lacks
+
+  Note over T,H: navigation
+  T->>H: canvas.viewport (gesture end; ≤ 10/s while dragging)
+  H->>T: canvas.viewport (Mac Fit all / Home)

@@ -5,8 +5,8 @@ apps/android/
 ├── core/        pure Kotlin/JVM library: no android.* imports
 │   └── app/inkbridge/core/
 │       ├── protocol/   Message, MessageCodec, Framing, FrameDecoder, PairingAuth
-│       ├── input/      StylusEvent, StylusInputSource, StrokeProcessor,
-│       │               CoordinateNormalizer, EventRateMeter
+│       ├── canvas/     Viewport, Bounds, CanvasDocument (the tablet's mirror)
+│       ├── input/      StylusEvent, StylusInputSource, StrokeProcessor, EventRateMeter
 │       ├── transport/  Transport, TcpTransport, AdbReverseTransport,
 │       │               WifiTcpTransport, ReconnectionPolicy
 │       └── client/     InkBridgeClient, ClientState, DeviceDescriptor
@@ -15,7 +15,8 @@ apps/android/
 │       ├── MainActivity.kt
 │       ├── input/      AndroidMotionEventSource, StylusCapabilityProbe
 │       └── features/
-│           ├── drawing/     DrawingSurfaceView, StylusDiagnostics
+│           ├── canvas/      CanvasView (gestures), CanvasRenderer (render thread)
+│           ├── drawing/     StylusDiagnostics
 │           ├── connection/  ConnectionSettings, BonjourDiscovery
 │           └── settings/    SettingsDialog
 └── simulator/   JVM "virtual tablet" using :core
@@ -55,13 +56,38 @@ only implementation. An `OnyxStylusInputSource` would be added only if hardware 
 show that standard MotionEvents are not good enough
 (see [`research/boox-sdk-analysis.md`](../research/boox-sdk-analysis.md)).
 
-## Coordinates
+## Coordinates and the infinite canvas
 
-`CoordinateNormalizer` divides by the **drawing view's** current size, clamps to
-0…1 and rounds to 1e-5. Rotation is handled by resizing: the manifest declares
-`configChanges="orientation|screenSize…"`, so rotating calls `onSizeChanged` instead
-of recreating the activity. The client then sends `device.surface`. Calibration is
-done on the Mac, so the tablet stays a dumb sensor.
+`StrokeProcessor` converts view px to **canvas px** through the current `Viewport`
+(`canvas = origin + px / zoom`, rounded to 0.01). The viewport is written only by the
+UI thread (gestures, buttons, host messages) and read on every sample. Rotation
+resizes the surface; canvas px are isotropic, so nothing distorts. See
+[coordinate-mapping.md](coordinate-mapping.md).
+
+## Local canvas (persistent ink)
+
+```
+UI thread:      MotionEvent → StrokeProcessor → client.submit → CanvasDocument.applyLocal → renderer.request
+network thread: host messages → CanvasDocument.applyHost → renderer.request
+render thread:  CanvasRenderer: copy under lock → draw outside lock → SurfaceView (dirty rect)
+```
+
+- **`CanvasDocument`** (pure Kotlin, tested on the JVM) is the mirror of the Mac's
+  document: local strokes shown optimistically, host styles, removals, host-only
+  strokes, `doc.reset` (keeping unsent local strokes). Every change is reported as
+  `Grew(id)` (draw only new segments) or `Full` (redraw).
+- **`CanvasRenderer`** runs on a `HandlerThread`. It owns a bitmap cache of the current
+  viewport. Writing draws new segments into the cache and posts **only their dirty
+  rect** to the surface, so no full-screen e-ink refresh happens while writing.
+  Viewport and document changes trigger one culled full redraw. Pinch and pan show a
+  transformed cache (≤ 20 fps) and redraw once on lift.
+- **Why off the UI thread:** the first version drew on the UI thread, and pen→Mac p95
+  went from 16 ms to 59 ms because input queued behind e-ink draws. With the render
+  thread, p95 is 14.9 ms with ink on (hardware measurement, testing.md).
+- **Gestures:** pen draws; one finger pans; two fingers pinch-zoom (`CanvasView`).
+  Buttons: −, +, Fit, Home.
+- **Monochrome on e-ink:** pens black, highlighter grey, eraser and laser as a thin
+  trail that disappears.
 
 ## Connection
 
@@ -86,8 +112,9 @@ done on the Mac, so the tablet stays a dumb sensor.
 
 Plain Views, no Compose or AppCompat: fewer dependencies, faster cold start, and
 nothing animated (animations look bad on e-ink). Diagnostics text refreshes at most
-4 times a second, because e-ink cannot redraw text at input rate. Local ink draws
-only the new segments into a bitmap and invalidates just their bounds.
+once a second, because e-ink cannot redraw text at input rate. The canvas is a
+`SurfaceView` drawn from its own thread (above). See
+[ui-specification.md](ui-specification.md#tablet-android).
 
 ## Logging
 

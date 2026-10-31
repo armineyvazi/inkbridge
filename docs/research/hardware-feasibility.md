@@ -75,11 +75,13 @@ estimate.
 |---------------|---------------------------|---------------------|---------------------|
 | Local ink **on** (tablet draws ink too) | 17.1 / 59.4 / 83.8 ms | 12.9 / 54.2 ms | 2.4 / 10.9 ms |
 | Local ink **off** | **5.0 / 16.0 / 25.0 ms** | 2.7 / 10.8 ms | 2.1 / 6.8 ms |
+| Local ink **on**, render thread (v2, injected strokes) | **6.4 / 14.9 / 23.3 ms** | 3.2 / 7.1 ms | 2.9 / 9.4 ms |
 | Mac ingest (decode → store) | 0.05–0.08 ms p50 | | |
 | RTT | 2.6–15 ms | | |
 
-**Finding:** drawing ink on the e-ink panel from the UI thread delays pen events by
-3–5× at the tail. Local ink is therefore **off by default**. Input-to-visible on the
+**Finding:** drawing ink on the e-ink panel *from the UI thread* delays pen events
+3–5× at the tail. **Fixed** by rendering on a dedicated thread with dirty-rect updates
+(ADR-006). Local ink is on by default again at no latency cost. Input-to-visible on the
 Mac ≈ pen→Mac + ≤ 1 display frame (8–17 ms) ≈ **13–33 ms typical**, comfortably
 under the 50 ms target. The first measurement session showed a p95 of ~600 ms, from
 connection warm-up and a not-yet-converged clock estimate. Treat measurements from the

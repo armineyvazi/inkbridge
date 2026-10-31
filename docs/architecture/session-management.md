@@ -1,64 +1,88 @@
-# Session management
+# Session management and export
 
-Status: autosave, crash recovery, manual save, and PNG/PDF/vector export are
-**implemented and unit tested**. Session history UI, the SQLite index and the
-`session.*` protocol messages are **not implemented** (Phase 4).
+Status (2026-10-31):
+- **Implemented and unit tested:** autosave, crash recovery, layered export through a
+  native save panel, PNG/JPEG full page, transparent ink layer, SVG and vector
+  strokes.
+- **Not implemented** (Phase 4): the session history UI, the SQLite index, and the
+  `session.*` protocol messages.
 
-## Lifecycle
+## What is stored, and where
 
-See [`diagrams/session-lifecycle.mmd`](../diagrams/session-lifecycle.mmd).
+The storage model keeps these apart (ADR-006). **The viewport is never part of
+stroke coordinates.**
 
-- Each launch starts a session `session-YYYYMMDD-HHMMSS`, unless the previous run
-  crashed (next section).
-- Every 5 s, if `StrokeStore.revision` changed, **autosave** writes `strokes.json`
-  and `session.json`. It writes no renders, so it is cheap.
-- **Crash recovery**: `cleanExit` is set to `false` at launch and `true` in
-  `applicationWillTerminate`. If the next launch finds it `false`, it reopens the last
-  session ID and reloads its strokes ("Recovered unsaved session" appears in the menu).
-  At most 5 s of strokes can be lost.
-- **Save** (⌃⌥S or the toolbar) writes the vector strokes and renders, then reveals
-  the PDF in Finder.
+| Data | Where | Format |
+|---|---|---|
+| Original vector strokes (canvas px, every sample: x, y, pressure, time; tool; style) | `strokes.json` | JSON array of `Stroke` |
+| Viewport at save time | `metadata.json` → `viewport` | `{x, y, zoom}` |
+| Canvas dimensions (tablet view px = canvas px at zoom 1) and page size | `metadata.json` | numbers |
+| Coordinate mapping (how canvas px land on the page) | `coordinate-mapping.json` | formula plus parameters |
+| Background screenshot | `background/screen.png` | PNG, display resolution |
+| Exported annotation layer | `annotations/annotations.png`, `annotations.svg` | transparent PNG, SVG |
+| Session metadata | `metadata.json`, `manifest.json` | JSON |
 
-## On disk
+## Autosave and recovery
 
+- Every 5 s, if the document changed, InkBridge writes `strokes.json` and
+  `session.json` to `~/Library/Application Support/InkBridge/Sessions/<session-id>/`.
+- `cleanExit` is false while the app runs. After a crash, the next launch reopens the
+  last session, including its viewport. At most 5 s can be lost.
+- Format: `session.json` has `"format": 2` (canvas px). Format-1 sessions (normalized
+  coordinates, from the first day of development) are **rejected rather than
+  misread**.
+
+## Nothing destroys saved work
+
+| Action | Effect on the live document | Effect on disk |
+|---|---|---|
+| Clear (Mac or tablet) | strokes removed, **undoable** | none until the next autosave; exported folders never touched |
+| Hide ink (Mac or tablet) | none (display only) | none |
+| Hide toolbar | none | none |
+| Tablet disconnects or restarts | none; the tablet gets a full resync on reconnect | none |
+| Mac app quits or crashes | restored from autosave | none |
+| Export to an existing folder | — | only after the save panel's own "Replace?" confirmation; atomic swap |
+
+## Export folder
+
+Save… (⌃⌥S) opens the native save panel (see the [UI specification](ui-specification.md#save)).
+The chosen name becomes a folder:
+
+```text
+InkBridge 2026-10-31 at 15.42.10/
+├── full-page.png | full-page.jpg   screen + ink composite, display pixel resolution   (needs background)
+├── preview.png                     composite, or ink on white if there is no background
+├── annotations/
+│   ├── annotations.png             ink only, transparent, same pixel grid as full-page
+│   ├── annotations.svg             ink only, vector, same coordinates (points)
+│   └── strokes.json                every stroke on the infinite canvas: the editable source
+├── background/
+│   └── screen.png                  the screenshot alone                                  (if captured)
+├── session/
+│   ├── metadata.json               session, devices, viewport, canvas size, calibration
+│   └── coordinate-mapping.json     canvas px → page transform and its parameters
+└── manifest.json                   file list, plus what was skipped and why
 ```
-~/Library/Application Support/InkBridge/
-├── Sessions/
-│   └── session-20261031-143210/
-│       ├── session.json     metadata (below)
-│       ├── strokes.json     [Stroke] in normalized coordinates: the source of truth
-│       ├── preview.png      2× raster, white or screenshot background
-│       ├── export.pdf       vector page at canvas size
-│       └── background.png   only if "Include a screenshot" is on
-└── Diagnostics/
-    └── diagnostics-YYYYMMDD-HHMMSS.txt
-```
 
-`session.json` holds: `id`, `title`, `startedAt`, `savedAt`, `deviceName`,
-`displayName`, canvas size, surface size, `fit`, `calibration`, `strokeCount`. That is
-everything needed to re-render the strokes exactly as they appeared
-(`SessionMetadata.mapper`).
+Choices against the brief's suggested layout:
+- The background has its own folder: it is a layer, like the annotations.
+- `manifest.json` makes a partial export self-describing.
+- The page images and SVG show **the current view**, the page the user saw.
+  `strokes.json` holds **the whole canvas**, including ink outside the view.
 
-**Vector preservation.** `strokes.json` keeps every sample (x, y, pressure, time)
-plus style. PDF output is vector paths. A reloaded session is fully editable
-(undo/redo history starts fresh).
+**Permissions and DRM.**
+- Without Screen Recording permission, or with the background turned off: the
+  background and full page are skipped, and the manifest and success alert say so.
+  The annotation layer, SVG, strokes and metadata are still written.
+- DRM-protected content is blacked out by macOS in the background layer. InkBridge does
+  not work around that.
 
-## Screenshots are opt-in
+**Atomicity.** The export writes into a hidden staging folder next to the destination,
+then moves it into place (or `replaceItemAt` when replacing). A failure leaves the
+destination exactly as it was.
 
-Screenshots are off by default. When enabled (Settings → Saving), saving calls
-`ScreenCaptureKit` (`SCScreenshotManager`, macOS 14+) for the selected display,
-**excluding InkBridge's own windows** so the ink is not baked in twice:
+## Storage format
 
-- macOS asks for Screen Recording permission the first time. If it is denied or
-  unavailable, the save still succeeds without a background, and the menu says so.
-- DRM-protected content shows up blacked out by the OS. InkBridge does not try to
-  work around it.
-
-## Storage format evaluation
-
-JSON is the current format for `strokes.json`. A 2 000-point stroke is about 80 KB,
-so an hour of dense annotation (~200 strokes × 300 points) is about 2–3 MB. That is
-fine for autosave every 5 s. A future binary encoding (fixed-width records, or
-float16 deltas) would cut this by about 5–8×. See
-[`ADR-005`](../decisions/ADR-005-storage.md) for when SQLite and a binary format
-become worth it (session history and search).
+JSON stays the right choice for now. A dense hour of writing is about 2–3 MB, and
+autosave rewrites it in milliseconds. See [ADR-005](../decisions/ADR-005-storage.md)
+for when to move to SQLite and a binary format.

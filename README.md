@@ -1,7 +1,7 @@
 # InkBridge
 
 Use a **BOOX** e-ink tablet (target: Note Air 3; tested on a Note Air 2 Plus) as a pen tablet for macOS. Write on the tablet, and your
-strokes appear as native vector ink **over whatever is on the Mac's screen**: videos,
+strokes stay on the tablet **and** appear as native vector ink **over whatever is on the Mac's screen**: videos,
 PDFs, browsers, Figma, slides. The overlay is click-through, so the app underneath
 keeps working.
 
@@ -11,7 +11,7 @@ about 30 KB/s while drawing, keeps ink editable, and runs entirely on your local
 network or USB cable.
 
 > **Status: Phase 0/1 (developer preview).** Protocol, Mac host, overlay, tools,
-> sessions and Android client are implemented. **Verified on a real BOOX Note Air 2 Plus
+> sessions, shared infinite canvas and Android client are implemented. **Verified on a real BOOX Note Air 2 Plus
 > over USB:** 360 Hz pen input with full pressure, tilt and hover; pen-to-Mac latency
 > p50 5 ms / p95 16 ms. See the [feasibility report](docs/research/hardware-feasibility.md). USB currently needs
 > USB debugging (`adb reverse`). A no-developer-mode USB transport (Android Open
@@ -46,11 +46,13 @@ simulated pen.
 
 | | |
 |---|---|
+| Canvas | infinite and shared: zoom (pinch, ±) and pan (finger) on the tablet, Fit all / Home on both; ink persists on the tablet |
 | Tools | pen (pressure), highlighter, stroke eraser, laser pointer, colors, widths |
 | Editing | undo/redo of whole strokes; clear is undoable |
 | Overlay | transparent, click-through, above full-screen apps, any display |
-| Shortcuts | ⌃⌥ P/H/E/L tools · Z undo · ⇧Z redo · C clear · O hide · S save · T toolbar |
-| Sessions | autosave every 5 s, crash recovery, save as vector JSON + PNG + PDF, optional screenshot background |
+| Toolbar | expanded / compact / minimal; bottom, top, left, right or anywhere; hide, then reopen from the menu-bar icon |
+| Shortcuts | ⌃⌥ P/H/E/L tools · Z undo · ⇧Z redo · C clear · F fit · 0 home · O hide · S save · T toolbar |
+| Sessions | autosave every 5 s, crash recovery; **Save…** to any folder: full page (PNG/JPEG), transparent ink layer (PNG + SVG), editable strokes, background, mapping metadata |
 | Connection | USB (adb reverse) or Wi-Fi (Bonjour + pairing code); auto-reconnect < 3 s; USB preferred when both are present |
 | Diagnostics | live RTT and pen-to-Mac latency; exportable report; on-tablet stylus readout |
 
@@ -68,8 +70,8 @@ docs/             research, architecture, protocol, ADRs, diagrams
 ## Tests
 
 ```bash
-make -C apps/macos test     # 63 Swift tests (unit + socket integration)
-make -C apps/android test   # 33 Kotlin tests (unit + socket integration)
+make -C apps/macos test     # 80 Swift tests (unit + socket integration)
+make -C apps/android test   # 43 Kotlin tests (unit + socket integration)
 scripts/e2e.sh && scripts/e2e.sh wifi
 ```
 
@@ -81,7 +83,7 @@ scripts/e2e.sh && scripts/e2e.sh wifi
 - There is no calibration wizard, session history browser or onboarding flow yet.
 - The tablet doesn't show the Mac's screen. That's by design.
 - Wi-Fi from the real tablet, eraser-end pens and the Note Air 3 itself are not yet tested.
-- Ink is not drawn on the tablet by default: e-ink rendering on the UI thread triples latency.
+- The tablet shows ink in monochrome (e-ink); colours appear on the Mac.
 
 ## Documentation
 

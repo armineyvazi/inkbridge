@@ -4,12 +4,27 @@
 
 | Suite | Command | Count | Last result (2026-10-31) |
 |-------|---------|-------|--------------------------|
-| Swift unit + integration | `make -C apps/macos test` | 63 | **63 passed** |
-| Kotlin `:core` unit + integration | `make -C apps/android test` | 33 | **33 passed** |
+| Swift unit + integration | `make -C apps/macos test` | 80 | **80 passed** |
+| Kotlin `:core` unit + integration | `make -C apps/android test` | 43 | **43 passed** |
 | Android lint | `./gradlew :app:lintDebug` | — | 0 errors, 22 warnings (i18n string literals, dependency-update notices) |
 | Cross-language E2E, USB path | `scripts/e2e.sh` | 6 strokes | **pass**: 720/720 points, 0 dropped |
 | Cross-language E2E, Wi-Fi path | `scripts/e2e.sh wifi` | 6 strokes | **pass**: 720/720 points, 0 dropped, pairing OK |
 | Swift benchmarks (release) | `make -C apps/macos bench` | — | see below |
+
+## Hardware scenarios (Note Air 2 Plus, USB, 2026-10-31)
+
+Driven with `adb shell input stylus swipe` / `input tap`, checked by tablet screenshots
+(`adb shell screencap`) and the Mac's autosave:
+
+| # | Scenario | Result |
+|---|---|---|
+| 1 | Persistent local drawing: 3 strokes stay visible | ✅ |
+| 2 | Infinite canvas: zoom out ×2 (44 %), draw in empty space at canvas (1598…2160, 2023…2698), earlier ink preserved | ✅ Mac autosave has all 5 strokes in canvas px; Mac viewport = tablet viewport |
+| 3 | Sync: tablet Clear → Mac clears (undoable) → tablet empties; tablet Undo → strokes come back **from the Mac**; Fit frames everything | ✅ |
+| 7 | Tablet app force-stopped and relaunched → full resync → all ink back | ✅ |
+| — | Latency with ink ON (new render thread), 20 injected strokes | ✅ pen→Mac p50 6.4 / p95 14.9 / p99 23.3 ms; on-tablet p95 7.1 ms (old UI-thread renderer: 54.2 ms) |
+| 4, 5 | Layered export, native save panel | ✅ unit tests (bundle contents, transparency, JPEG, SVG culling, no-permission path, atomic replace); ⏳ manual run of the panel |
+| 6 | Toolbar resize, dock left/right, hide, reopen from menu bar | ⏳ manual check (builds; behaviour not unit-testable) |
 
 ## Coverage map
 
@@ -25,7 +40,10 @@
 | Smoothing passes through samples, decimation | `SmoothingTests` | — |
 | Sequence de-dup across reconnects | `StrokeIngestorTests` | `InkBridgeClientTest.handshakeThenOrderedStrokes` |
 | Clock sync, latency stats, peer arbitration | `SessionTests` | — |
-| Session save/load, PNG and PDF validity, rendered pixels | `SessionTests` | — |
+| Autosave round trip; old format rejected; export bundle layers, transparency, JPEG, SVG, no-permission path, atomic replace | `SessionTests` | — |
+| Viewport math: fit, zoom about focus, clamp, pan, unmap | `CoordinateMapperTests`, `ViewportTests` | `ViewportTest` |
+| Document sync: resync, no echo, minimal diffs, eraser drop, chunking; tablet commands | `DocumentSyncTests` | `CanvasDocumentTest`, `InkBridgeClientTest.hostDocumentMessages…` |
+| v2 messages and colour hex agree across languages | `MessageCodecTests.testV2Messages` | `MessageCodecTest.v2Messages`, `colorHexMatchesSwift` |
 | Server: USB handshake, Wi-Fi auth OK / wrong / missing, strokes before hello, handshake timeout, oversized frame, invalid message survival, ping/pong, idle timeout | `InkServerTests` (real sockets) | — |
 | Client: handshake, ordering, pairing, wrong code without retry loop, reconnect < 3 s with queued delivery, RTT, connection refused | — | `InkBridgeClientTest` (real sockets) |
 | Backoff and jitter bounds | — | `ReconnectionPolicyTest` |

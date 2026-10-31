@@ -21,9 +21,12 @@ in `StrokeRenderer`. Separate engine objects would mostly forward calls to each 
 
 ## Model
 
-- `Stroke { id, tool, style, points: [InkPoint] }`. Points stay **normalized**, so the
-  document is resolution-independent and remaps when the display or fit changes.
-- `StrokeStyle { color, width, pressureSensitive }` is captured at `stroke.begin`.
+- `Stroke { id, tool, style, points: [InkPoint] }`. Points are **canvas px** on an
+  infinite canvas (ADR-006), independent of the zoom, pan, display and fit. Only the
+  `CoordinateMapper` changes when the view does.
+- `StrokeStyle { color, width (canvas px), pressureSensitive }` is captured at
+  `stroke.begin`. Widths scale with zoom; the toolbar width is converted from on-screen
+  points at the zoom the stroke starts at.
   Changing the toolbar later does not restyle ink already on screen.
 - `StrokeStore` holds:
   - `strokes`: committed, in z-order
@@ -54,11 +57,24 @@ distances. An earlier point-only version missed thin lines whenever a fast swipe
 two samples on either side of the line; `testFastSwipeBetweenSamplesStillErases`
 is the regression test for that.
 
-Distances are measured in normalized height units, with x scaled by the active
-rect's aspect ratio, so the eraser is round on screen. A bounding-box precheck skips
+Distances are measured in canvas px, which are isotropic, so the eraser is round.
+The toolbar's eraser size (a fraction of the display height) is converted to canvas px
+at the current zoom. A bounding-box precheck skips
 most strokes.
 
 A pixel/partial eraser (splitting strokes) is not implemented.
+
+## Culling
+
+On an infinite canvas most ink can be off-screen. `StrokeRenderer.draw` skips strokes
+whose display bounds miss the context's clip rect, and so does the SVG writer. The
+tablet renderer culls against the viewport the same way.
+
+## Document sync
+
+The Mac's `StrokeStore` is the document of record. `DocumentSync` mirrors it to the
+tablet by ID diffs (`Session/DocumentSync.swift`). See
+[ADR-006](../decisions/ADR-006-infinite-canvas-and-sync.md) and the protocol §5.
 
 ## Smoothing
 

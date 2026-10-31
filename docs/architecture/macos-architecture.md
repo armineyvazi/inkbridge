@@ -5,7 +5,7 @@ A Swift package (`apps/macos/Package.swift`) with three products:
 | Target | Kind | Contents |
 |--------|------|----------|
 | `InkBridgeCore` | library | `Protocol/`, `Transport/`, `Drawing/`, `Session/`, `Storage/`. No AppKit, so it is testable headless. |
-| `InkBridge` | executable → `InkBridge.app` | `App/`, `Features/{Overlay,Toolbar,Settings}`, `Infrastructure/{HotKeys,ScreenCapture}` |
+| `InkBridge` | executable → `InkBridge.app` | `App/`, `Features/{Overlay,Toolbar,Export,Settings}`, `Infrastructure/{HotKeys,ScreenCapture}` |
 | `inkbridge-probe` | executable | headless host for end-to-end and latency tests |
 
 It is SwiftPM rather than an `.xcodeproj` so it builds and tests from the command line
@@ -27,7 +27,9 @@ flowchart TB
   IC --> ARB[PeerArbiter]
   IC --> ING[StrokeIngestor] --> ST[StrokeStore]
   IC --> OW[OverlayWindow] --> OV[OverlayView]
-  IC --> TP[ToolbarPanel] --> TV[ToolbarView SwiftUI]
+  IC --> DS[DocumentSync]
+  IC --> TC[ToolbarController] --> TP[ToolbarPanel] --> TV[ToolbarView SwiftUI]
+  IC --> EX[ExportController] --> SA
   IC --> HK[HotKeyCenter]
   IC --> SA[SessionArchive]
   TV --> M[AppModel ObservableObject]
@@ -38,7 +40,17 @@ flowchart TB
   the persisted preferences (pairing code, Wi-Fi on/off, transport preference,
   display, fit, screenshot opt-in).
 - `InkCoordinator` is the only place where the server, the drawing model and the
-  windows meet. It implements `InkServerDelegate` and `ToolbarActions`.
+  windows meet. It implements `InkServerDelegate` and `ToolbarActions`. After every
+  document change it calls `syncDocument()`, which sends the tablet `DocumentSync`'s
+  diff.
+- `ToolbarController` owns the toolbar: size (expanded/compact/minimal), dock
+  (bottom/top/left/right/floating), and visibility, all persisted.
+- `ExportController` runs Save…: screenshot first, then the `NSSavePanel` with
+  options, then `SessionArchive.export`, then an alert.
+- `MenuBarController`: a left-click re-opens a hidden toolbar; otherwise it shows the
+  menu.
+
+UI details: [ui-specification.md](ui-specification.md).
 
 ## Overlay window
 

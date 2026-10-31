@@ -46,12 +46,22 @@ adb reverse, p50 5 ms). Note Air 3 itself is still untested.
 | Global keyboard shortcuts | 🟡 |
 | Colors, widths, highlighter opacity, eraser size | 🟡 (opacity setting not yet in the toolbar UI) |
 
+## Phase 2b: shared infinite canvas (ADR-006, 2026-10-31)
+
+| Deliverable | Status |
+|-------------|--------|
+| Protocol v2 (canvas px, viewport, commands, doc sync) | ✅ |
+| Persistent local ink on the tablet, render thread, dirty-rect e-ink updates | ✅ hardware |
+| Zoom (pinch, ±), pan (finger), Fit, Home on the tablet; Fit/Home on the Mac | ✅ hardware (buttons); ⏳ pinch with fingers by the owner |
+| Mac ↔ tablet document sync (style, erase, undo, clear, resync) | ✅ hardware |
+| Adaptive toolbar: 3 sizes, 5 positions, hide, menu-bar reopen | 🟡 built; manual check pending |
+
 ## Phase 4: sessions
 
 | Deliverable | Status |
 |-------------|--------|
 | Autosave + crash recovery | ✅ unit / 🟡 manual |
-| Save: strokes.json + PNG + PDF | ✅ |
+| Save: native save panel, layered export (full page PNG/JPEG, transparent ink PNG, SVG, strokes.json, background, metadata, mapping) | ✅ unit / 🟡 manual panel run |
 | Optional screenshot background (ScreenCaptureKit) | 🟡 |
 | Session history UI, SQLite index | ⬜ |
 | `session.*` protocol messages acted on | ⬜ |

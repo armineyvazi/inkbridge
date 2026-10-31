@@ -1,17 +1,20 @@
-%% InkBridge system architecture (as built, Phase 0/1).
+%% InkBridge system architecture (as built, protocol v2 / ADR-006).
 flowchart TB
   subgraph Tablet["BOOX Note Air 3 · Android 12 · Kotlin"]
     direction TB
     Pen["Wacom EMR stylus<br/>(digitizer)"] --> ME["Android input system<br/>MotionEvent + historical samples"]
     ME --> AMES["AndroidMotionEventSource<br/>:app input/"]
     AMES --> SP["StrokeProcessor<br/>palm rejection · stroke IDs · batching"]
-    SP --> CN["CoordinateNormalizer<br/>px → 0..1"]
-    CN --> CL["InkBridgeClient<br/>outbox · sequence · handshake<br/>ping/pong · reconnect"]
+    SP --> VP["Viewport<br/>view px → canvas px"]
+    VP --> CL["InkBridgeClient<br/>outbox · sequence · handshake<br/>ping/pong · reconnect"]
     CL --> TR{"Transport"}
     TR --> ADB["AdbReverseTransport<br/>127.0.0.1:8765"]
     TR --> WIFI["WifiTcpTransport<br/>mac-ip:8766"]
     TR -.-> AOA["NativeUsbTransport (AOA)<br/>planned · handshake verified"]
-    AMES --> DS["DrawingSurfaceView<br/>local ink + diagnostics"]
+    AMES --> CD["CanvasDocument<br/>mirror of the Mac document"]
+    CL -- "doc.* · stroke.style · viewport" --> CD
+    CD --> RND["CanvasRenderer (own thread)<br/>dirty-rect e-ink updates"]
+    RND --> CV["CanvasView (SurfaceView)<br/>pen draws · fingers pan/zoom"]
   end
 
   ADB == "USB-C cable<br/>adbd tunnel" ==> LO
@@ -28,12 +31,16 @@ flowchart TB
     ARB --> ING["StrokeIngestor<br/>sequence de-dup · tool resolution"]
     ING --> STORE["StrokeStore<br/>strokes · undo/redo · eraser · laser"]
     STORE --> OV["OverlayView<br/>cached committed ink + live strokes"]
-    MAP["CoordinateMapper<br/>aspect fit · calibration"] --> OV
+    STORE --> SYNC["DocumentSync<br/>ID diffs → tablet"]
+    SYNC -.-> PC
+    MAP["CoordinateMapper<br/>viewport · aspect fit · calibration"] --> OV
     OV --> OW["OverlayWindow<br/>transparent · click-through<br/>.screenSaver level · all Spaces"]
-    TB2["ToolbarPanel (SwiftUI)<br/>non-activating"] --> MODEL["AppModel"]
+    TB2["ToolbarController + View<br/>3 sizes · 5 positions · hide"] --> MODEL["AppModel"]
+    MB["Menu-bar icon<br/>reopens toolbar"] --> TB2
     HK["HotKeyCenter (Carbon)"] --> MODEL
     MODEL --> ING
-    STORE --> ARCH["SessionArchive<br/>strokes.json · PNG · PDF"]
+    STORE --> ARCH["SessionArchive + SVGWriter<br/>full page · ink PNG/SVG · strokes.json"]
+    EXP["ExportController<br/>NSSavePanel"] --> ARCH
     SC["ScreenCapture (optional)<br/>ScreenCaptureKit"] --> ARCH
   end
 

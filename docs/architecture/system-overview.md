@@ -1,9 +1,16 @@
 # System overview
 
-InkBridge turns a BOOX Note Air 3 into a drawing tablet for macOS. The tablet
-**captures** pen input and sends **stroke events**: normalized coordinates, pressure
-and timestamps. The Mac **renders** them natively in a transparent, click-through
-overlay above whatever is on screen. No pixels are streamed in either direction.
+InkBridge turns a BOOX tablet (target Note Air 3; verified on a Note Air 2 Plus) into
+a drawing tablet for macOS. The tablet **captures** pen input and sends **stroke
+events** in canvas coordinates, with pressure and timestamps. The Mac **renders** them
+natively in a transparent, click-through overlay above whatever is on screen.
+
+Since protocol v2 ([ADR-006](../decisions/ADR-006-infinite-canvas-and-sync.md)):
+- The drawing is an **infinite canvas** shared by both screens.
+- The tablet shows persistent ink and supports zoom and pan.
+- The Mac owns the document and keeps the tablet's mirror in sync with ID diffs.
+
+No pixels are streamed in either direction.
 
 ## Components
 
