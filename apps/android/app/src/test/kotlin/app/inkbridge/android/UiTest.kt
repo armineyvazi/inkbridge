@@ -22,6 +22,7 @@ import app.inkbridge.core.protocol.Tool
 import app.inkbridge.core.protocol.InkPoint
 import app.inkbridge.core.protocol.WireStyle
 import app.inkbridge.core.canvas.CanvasBackground
+import app.inkbridge.core.protocol.Payload
 import org.junit.Before
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -241,6 +242,15 @@ class UiTest {
         assertTrue("150%" in root.texts(), "zoom is preserved")
         root.byLabel("Close").performClick()
         assertTrue("Studio canvas" !in root.texts())
+    }
+
+    @Test
+    fun hostDocumentIsMirroredEvenWhenTheCanvasWasNeverOpened() {
+        Robolectric.buildActivity(DashboardActivity::class.java).setup()
+        val handler = assertNotNull(app.connection.client.onHostPayload)
+        val before = app.connection.document.backgroundRevision
+        handler(Payload.Background(CanvasBackground.studio(CanvasBackground.BLACK), before + 1))
+        assertEquals(CanvasBackground.BLACK, app.connection.document.background.argb)
     }
 
     @Test

@@ -119,11 +119,11 @@ extension InkCoordinator: ToolbarActions {
     static var sessionsDirectory: URL { supportDirectory.appendingPathComponent("Sessions") }
 
     var overlayDisplayID: CGDirectDisplayID? {
-        DisplayManager.screen(for: model.displayID).flatMap(DisplayManager.displayID(of:))
+        targetScreen.flatMap(DisplayManager.displayID(of:))
     }
 
     func makeMetadata() -> SessionMetadata {
-        let screen = DisplayManager.screen(for: model.displayID)
+        let screen = targetScreen
         return SessionMetadata(
             id: sessionID, title: sessionID, startedAt: sessionStarted, savedAt: Date(),
             deviceName: model.connection.deviceName, displayName: screen?.localizedName,

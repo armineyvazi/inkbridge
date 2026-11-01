@@ -72,6 +72,9 @@ final class AppModel: ObservableObject {
         didSet { defaults.set(transportPreference.rawValue, forKey: "transportPreference") }
     }
     @Published var fit: CoordinateMapper.Fit { didSet { defaults.set(fit.rawValue, forKey: "fit") } }
+    /// Ink, Studio Canvas and toolbar move to the display you last clicked on.
+    /// Off: they stay on `displayID` (or the primary display).
+    @Published var followMouse: Bool { didSet { defaults.set(followMouse, forKey: "followMouse") } }
     @Published var displayID: CGDirectDisplayID? {
         didSet { defaults.set(displayID.map { Int($0) }, forKey: "displayID") }
     }
@@ -100,6 +103,7 @@ final class AppModel: ObservableObject {
         transportPreference = PeerArbiter.Preference(rawValue: defaults.string(forKey: "transportPreference") ?? "") ?? .preferUSB
         fit = CoordinateMapper.Fit(rawValue: defaults.string(forKey: "fit") ?? "") ?? .aspectFit
         displayID = (defaults.object(forKey: "displayID") as? Int).map { CGDirectDisplayID($0) }
+        followMouse = defaults.object(forKey: "followMouse") as? Bool ?? true
         includeScreenshot = defaults.bool(forKey: "includeScreenshot")
         fullPageFormat = ExportOptions.ImageFormat(rawValue: defaults.string(forKey: "fullPageFormat") ?? "") ?? .png
         toolbarSize = ToolbarSize(rawValue: defaults.string(forKey: "toolbarSize") ?? "") ?? .expanded

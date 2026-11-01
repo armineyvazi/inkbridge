@@ -41,6 +41,52 @@ final class InkCoordinator: NSObject {
     private var pendingReceiveNs: Int64?
     private var lastActiveStream: String?
 
+    // MARK: Displays
+
+    /// The display the user last clicked on (follow-mouse mode).
+    private var followedDisplayID: CGDirectDisplayID?
+    private var mouseMonitors: [Any] = []
+
+    /// Where ink, Studio Canvas and the toolbar are shown.
+    var targetScreen: NSScreen? {
+        if model.followMouse, let id = followedDisplayID,
+           let s = NSScreen.screens.first(where: { DisplayManager.displayID(of: $0) == id }) { return s }
+        return DisplayManager.screen(for: model.displayID)
+    }
+
+    /// Follows clicks across monitors. Mouse-button monitors need no special
+    /// permission (unlike key monitors). Global sees clicks in other apps; local
+    /// sees clicks on InkBridge's own windows (Studio Canvas catches clicks).
+    private func startFollowingMouse() {
+        followedDisplayID = DisplayManager.screenUnderMouse().flatMap(DisplayManager.displayID(of:))
+        let mask: NSEvent.EventTypeMask = [.leftMouseDown, .rightMouseDown, .otherMouseDown]
+        if let g = NSEvent.addGlobalMonitorForEvents(matching: mask, handler: { [weak self] _ in self?.mouseClicked() }) {
+            mouseMonitors.append(g)
+        }
+        if let l = NSEvent.addLocalMonitorForEvents(matching: mask, handler: { [weak self] e in self?.mouseClicked(); return e }) {
+            mouseMonitors.append(l)
+        }
+    }
+
+    private func mouseClicked() {
+        guard model.followMouse, let screen = DisplayManager.screenUnderMouse(),
+              let id = DisplayManager.displayID(of: screen), id != followedDisplayID else { return }
+        followedDisplayID = id
+        relayoutOverlay()
+    }
+
+    /// Pins ink to one display (nil = follow the mouse).
+    func setDisplay(_ id: CGDirectDisplayID?) {
+        if let id {
+            model.followMouse = false
+            model.displayID = id
+        } else {
+            model.followMouse = true
+            followedDisplayID = DisplayManager.screenUnderMouse().flatMap(DisplayManager.displayID(of:))
+        }
+        relayoutOverlay()
+    }
+
     let pairedDevices: PairedDevices
     let identity: HostIdentity?
     private lazy var networkWatcher = NetworkWatcher { [weak self] in self?.server.restartWifiListener() }
@@ -91,9 +137,10 @@ final class InkCoordinator: NSObject {
             guard let self else { return (tool, StrokeStyle(color: .black, width: 3, pressureSensitive: true)) }
             return self.resolveInCanvasUnits(tool)
         }
+        startFollowingMouse()
         buildOverlay()
         toolbar = ToolbarController(model: model, actions: self)
-        toolbar.start(on: DisplayManager.screen(for: model.displayID))
+        toolbar.start(on: targetScreen)
         registerHotKeys()
         observeModel()
         server.start()
@@ -122,7 +169,7 @@ final class InkCoordinator: NSObject {
     // MARK: Overlay
 
     private func buildOverlay() {
-        guard let screen = DisplayManager.screen(for: model.displayID) else { return }
+        guard let screen = targetScreen else { return }
         overlayView = OverlayView(store: store, mapper: mapper(for: screen))
         overlayView.onDraw = { [weak self] ns in self?.didDraw(at: ns) }
         overlayWindow = OverlayWindow(screen: screen, content: overlayView)
@@ -140,12 +187,12 @@ final class InkCoordinator: NSObject {
     }
 
     func relayoutOverlay() {
-        guard let screen = DisplayManager.screen(for: model.displayID), let overlayWindow else { return }
+        guard let screen = targetScreen, let overlayWindow else { return }
         overlayWindow.move(to: screen)
         overlayView.mapper = mapper(for: screen)
         model.viewport = ingestor.viewport
         updateEraserRadius()
-        toolbar?.screenChanged(DisplayManager.screen(for: model.displayID))
+        toolbar?.screenChanged(targetScreen)
     }
 
     /// The eraser size is a fraction of the display height; convert to canvas px.
@@ -165,6 +212,7 @@ final class InkCoordinator: NSObject {
         }.store(in: &bag)
         model.$fit.dropFirst().receive(on: RunLoop.main).sink { [weak self] _ in self?.relayoutOverlay() }.store(in: &bag)
         model.$displayID.dropFirst().receive(on: RunLoop.main).sink { [weak self] _ in self?.relayoutOverlay() }.store(in: &bag)
+        model.$followMouse.dropFirst().receive(on: RunLoop.main).sink { [weak self] _ in self?.relayoutOverlay() }.store(in: &bag)
         model.$eraserRadius.dropFirst().receive(on: RunLoop.main).sink { [weak self] _ in self?.updateEraserRadius() }.store(in: &bag)
     }
 

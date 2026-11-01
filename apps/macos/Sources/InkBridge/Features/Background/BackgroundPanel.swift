@@ -79,6 +79,7 @@ struct BackgroundPanel: View {
                     }), supportsOpacity: false)
                     .labelsHidden()
                     .help("Custom colour")
+                Text("Custom").font(.caption).foregroundStyle(.secondary)
             }
 
             Text("Paper").font(.caption).foregroundStyle(.secondary)

@@ -105,7 +105,7 @@ class CanvasActivity : InkActivity() {
     }
 
     override fun onDestroy() {
-        manager.client.onHostPayload = { p -> if (p !is Payload.CanvasViewport) manager.document.applyHost(p) }
+        manager.client.onHostPayload = manager.defaultHostHandler
         manager.saveViewport(canvas.viewport)
         renderer.quit()
         super.onDestroy()

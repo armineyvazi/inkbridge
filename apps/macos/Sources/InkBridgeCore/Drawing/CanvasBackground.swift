@@ -61,9 +61,10 @@ public struct CanvasBackground: Codable, Equatable, Sendable {
     /// Pattern lines: light on dark surfaces, dark on light ones, neutral over the desktop.
     public var patternColor: RGBA {
         switch (mode, isDark) {
-        case (.overlay, _): return RGBA(0.5, 0.5, 0.5, 0.45)
-        case (_, true): return RGBA(1, 1, 1, 0.18)
-        default: return RGBA(0, 0, 0, 0.14)
+        // Strong enough to read on non-Retina external displays (1 px lines/dots).
+        case (.overlay, _): return RGBA(0.5, 0.5, 0.5, 0.5)
+        case (_, true): return RGBA(1, 1, 1, 0.3)
+        default: return RGBA(0, 0, 0, 0.2)
         }
     }
 }
@@ -92,7 +93,7 @@ public enum BackgroundRenderer {
 
         if bg.pattern == .dots {
             ctx.setFillColor(RGBA(c.r, c.g, c.b, min(1, c.a * 2.2)).cgColor)
-            let r = max(1.2, 1.6 * min(scale, 2))
+            let r = max(1.6, 1.8 * min(scale, 2))
             forEachLine(from: minX, to: maxX, step: spacing.minor) { x in
                 forEachLine(from: minY, to: maxY, step: spacing.minor) { y in
                     let p = mapper.map(x: x, y: y)
@@ -115,8 +116,8 @@ public enum BackgroundRenderer {
             }
             ctx.strokePath()
         }
-        lines(step: spacing.minor, width: 0.5, alpha: 1)
-        if spacing.major > 0 { lines(step: spacing.major, width: 1, alpha: 1.8) }
+        lines(step: spacing.minor, width: 1, alpha: 1)
+        if spacing.major > 0 { lines(step: spacing.major, width: 1.5, alpha: 1.8) }
     }
 
     private static func forEachLine(from a: Double, to b: Double, step: Double, _ body: (Double) -> Void) {

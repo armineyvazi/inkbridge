@@ -94,7 +94,15 @@ class ConnectionManager(private val ctx: Context) {
     }.stateIn(scope, SharingStarted.Eagerly, ConnectionStatus.describe(
         ConnectionFacts(settings.mode, _paired.value?.name, false, 0, null, null, false, false)))
 
+    /** Mirrors every host document message, whichever screen is showing. The canvas adds viewport handling. */
+    val defaultHostHandler: (app.inkbridge.core.protocol.Payload) -> Unit = { p ->
+        if (p !is app.inkbridge.core.protocol.Payload.CanvasViewport) document.applyHost(p)
+    }
+
     init {
+        // Regression: this used to be set only by the canvas screen, so the Mac's resync on
+        // connect (usually while Home is showing) was dropped and the canvas opened empty.
+        client.onHostPayload = defaultHostHandler
         client.onPaired = { r -> scope.launch { onPaired(r) } }
         // Keep the client's Failed(NOT_PAIRED) state so the screen says why; only drop the stale secret.
         client.onUnpaired = { scope.launch { pairingStore.clear(); _paired.value = null } }

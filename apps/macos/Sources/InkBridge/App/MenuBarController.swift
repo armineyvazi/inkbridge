@@ -61,6 +61,12 @@ final class MenuBarController: NSObject, NSMenuDelegate {
         add(menu, coordinator.isToolbarVisible ? "Hide Toolbar" : "Show Toolbar", #selector(toggleToolbar))
         menu.addItem(toolbarSubmenu("Toolbar Size", ToolbarSize.allCases.map { ($0.title, $0.rawValue, $0 == m.toolbarSize) }, #selector(setSize)))
         menu.addItem(toolbarSubmenu("Toolbar Position", ToolbarDock.allCases.map { ($0.title, $0.rawValue, $0 == m.toolbarDock) }, #selector(setDock)))
+        if DisplayManager.displays.count > 1 {
+            let options = [("Follow the Screen I Click", "follow", m.followMouse)]
+                + DisplayManager.displays.map { ($0.name, String($0.id), !m.followMouse && m.displayID == $0.id) }
+            menu.addItem(toolbarSubmenu("Draw On", options, #selector(setDisplay)))
+        }
+        add(menu, m.background.mode == .studio ? "Back to Desktop Overlay" : "Studio Canvas", #selector(toggleStudio), key: "b")
         menu.addItem(.separator())
         add(menu, m.overlayVisible ? "Hide Ink" : "Show Ink", #selector(toggleOverlay))
         add(menu, "Fit All Ink", #selector(fitAll))
@@ -106,6 +112,12 @@ final class MenuBarController: NSObject, NSMenuDelegate {
     }
 
     @objc private func connectDevice() { coordinator.openConnectDevice() }
+    @objc private func setDisplay(_ sender: NSMenuItem) {
+        guard let raw = sender.representedObject as? String else { return }
+        coordinator.setDisplay(raw == "follow" ? nil : UInt32(raw).map { CGDirectDisplayID($0) })
+    }
+
+    @objc private func toggleStudio() { coordinator.toggleStudio() }
     @objc private func toggleToolbar() { coordinator.toggleToolbar() }
     @objc private func toggleOverlay() { coordinator.toggleOverlay() }
     @objc private func fitAll() { coordinator.fitAll() }

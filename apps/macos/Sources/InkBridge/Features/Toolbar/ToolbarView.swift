@@ -14,6 +14,8 @@ protocol ToolbarActions: AnyObject {
     func hideToolbar()
     /// Changes the canvas background layer (one undo step, synced to the tablet).
     func setBackground(_ background: CanvasBackground)
+    /// nil = follow the screen the user clicks; otherwise pin to that display.
+    func setDisplay(_ id: CGDirectDisplayID?)
 }
 
 /// The floating tool palette.
@@ -182,6 +184,14 @@ struct ToolbarView: View {
             }
             Picker("Position", selection: $model.toolbarDock) {
                 ForEach(ToolbarDock.allCases) { Text($0.title).tag($0) }
+            }
+            if DisplayManager.displays.count > 1 {
+                Picker("Display", selection: Binding<CGDirectDisplayID?>(
+                    get: { model.followMouse ? nil : model.displayID },
+                    set: { actions?.setDisplay($0) })) {
+                    Text("Follow the screen I click").tag(CGDirectDisplayID?.none)
+                    ForEach(DisplayManager.displays) { d in Text(d.name).tag(Optional(d.id)) }
+                }
             }
             Divider()
             if model.toolbarSize != .expanded {

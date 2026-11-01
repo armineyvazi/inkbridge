@@ -19,4 +19,9 @@
 | **On the BOOX hardware** | — | ⏳ The tablet was not on USB/adb during this phase. Install with `make -C apps/android install` |
 | **Mac UI by hand** (toolbar panel, ⌃⌥B, studio covering a video, clicks caught) | — | ⏳ Needs a person (no screen-recording or accessibility permission for automation) |
 
-Totals after Phase 1: 95 Swift, 63 Kotlin core and 12 Robolectric UI tests, all passing; Android lint clean.
+| Dots visible on black (regression: too faint on non-Retina HDMI monitors) | `BackgroundPatternTests.testDotsAreVisibleOnBlack`; pattern contrast raised | ✅ |
+| Tablet mirrors the Mac's resync while the canvas screen is closed (regression) | `UiTest.hostDocumentIsMirroredEvenWhenTheCanvasWasNeverOpened` | ✅ |
+| Toolbar stays centred (regression) | Measured on the owner's Mac: centre 756 = screen centre 756 | ✅ |
+| Multi-display follow / pin | Logic checked against the owner's 3 displays (built-in + 2× MSI MD271P) | ⏳ by hand: needs real clicks |
+
+Totals after Phase 1: 96 Swift, 63 Kotlin core and 13 Robolectric UI tests, all passing; Android lint clean.

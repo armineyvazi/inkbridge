@@ -47,11 +47,15 @@ struct SettingsView: View {
             }
 
             Section("Display") {
-                Picker("Draw on", selection: $model.displayID) {
+                Toggle("Follow the screen I click", isOn: $model.followMouse)
+                Text("With several monitors, ink, Studio Canvas and the toolbar move to the display you last clicked on.")
+                    .font(.caption).foregroundStyle(.secondary)
+                Picker("Otherwise draw on", selection: $model.displayID) {
                     ForEach(DisplayManager.displays) { d in
                         Text("\(d.name) (\(Int(d.size.width))×\(Int(d.size.height)))").tag(Optional(d.id))
                     }
                 }
+                .disabled(model.followMouse)
                 Picker("Tablet mapping", selection: $model.fit) {
                     Text("Keep tablet proportions").tag(CoordinateMapper.Fit.aspectFit)
                     Text("Stretch to fill display").tag(CoordinateMapper.Fit.stretch)

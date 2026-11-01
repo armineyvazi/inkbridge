@@ -135,3 +135,16 @@ final class BackgroundTests: XCTestCase {
         return (buf[0], buf[1], buf[2], buf[3])
     }
 }
+
+final class BackgroundPatternTests: XCTestCase {
+    /// Regression: dots on a black studio canvas were invisible.
+    func testDotsAreVisibleOnBlack() throws {
+        let mapper = CoordinateMapper(canvas: CGSize(width: 1512, height: 982), surface: CGSize(width: 1404, height: 1872))
+        let img = try SessionArchive.renderImage([], mapper: mapper, background: nil,
+                                                 canvasBackground: .studio(CanvasBackground.black, pattern: .dots), scale: 1)
+        var bright = 0
+        let data = CFDataGetBytePtr(img.dataProvider!.data)!
+        for i in stride(from: 0, to: img.bytesPerRow * img.height, by: 4) where data[i] > 40 { bright += 1 }
+        XCTAssertGreaterThan(bright, 200, "dot pixels drawn: \(bright)")
+    }
+}

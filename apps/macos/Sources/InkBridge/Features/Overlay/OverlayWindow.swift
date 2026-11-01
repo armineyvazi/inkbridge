@@ -58,9 +58,17 @@ enum DisplayManager {
         }
     }
 
-    /// The selected screen, or the main screen if it was unplugged.
+    /// The selected screen, or the primary display (the one with the menu bar)
+    /// if none is selected or it was unplugged. Not `NSScreen.main`: that follows
+    /// the focused window, so ink would jump between monitors as you click around.
     static func screen(for id: CGDirectDisplayID?) -> NSScreen? {
         if let id, let s = NSScreen.screens.first(where: { displayID(of: $0) == id }) { return s }
-        return NSScreen.main ?? NSScreen.screens.first
+        return NSScreen.screens.first
+    }
+
+    /// The display under the mouse pointer.
+    static func screenUnderMouse() -> NSScreen? {
+        let p = NSEvent.mouseLocation
+        return NSScreen.screens.first { NSMouseInRect(p, $0.frame, false) }
     }
 }
