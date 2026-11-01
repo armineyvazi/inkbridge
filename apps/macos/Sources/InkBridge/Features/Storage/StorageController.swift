@@ -169,8 +169,10 @@ final class StorageController: ObservableObject {
         return n
     }
 
-    /// Saves the current session, then starts a new one in `name`.
-    func switchProject(_ name: String) throws {
+    /// Saves the current session, then starts a new one in `name`, which must be an existing project.
+    func switchProject(_ raw: String) throws {
+        guard let name = ProjectStore.validName(raw), projectStore.isSafeProjectName(name) else { throw StorageError.invalidName(raw) }
+        guard projectStore.listProjects().contains(where: { $0.name == name }) else { throw StorageError.notFound(name) }
         try saveNow()
         try projectStore.ensureProject(name)
         config.activeProject = name

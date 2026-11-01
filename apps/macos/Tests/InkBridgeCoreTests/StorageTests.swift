@@ -46,6 +46,17 @@ final class StorageTests: XCTestCase {
         XCTAssertEqual(store.listProjects().map(\.name), ["Architecture"], "deleted projects go to the Trash")
     }
 
+    /// Regression (security review): names from the tablet must never escape Projects/.
+    func testProjectNamesCannotEscapeTheProjectsFolder() throws {
+        let store = ProjectStore(root: tmp)
+        for bad in ["../../evil", "..", "a/b", "/etc", ".ssh", "x:y"] {
+            XCTAssertFalse(store.isSafeProjectName(bad), bad)
+            XCTAssertThrowsError(try store.ensureProject(bad), bad)
+        }
+        XCTAssertFalse(FileManager.default.fileExists(atPath: tmp.deletingLastPathComponent().appendingPathComponent("evil").path))
+        XCTAssertTrue(store.isSafeProjectName("System Design"))
+    }
+
     func testMigrationMovesProjectsWithoutOverwriting() throws {
         let old = ProjectStore(root: tmp.appendingPathComponent("old"))
         let new = ProjectStore(root: tmp.appendingPathComponent("new"))

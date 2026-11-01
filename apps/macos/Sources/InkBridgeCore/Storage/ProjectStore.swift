@@ -171,8 +171,18 @@ public final class ProjectStore {
         return q.isEmpty ? listProjects() : listProjects().filter { $0.name.localizedCaseInsensitiveContains(q) }
     }
 
+    /// True only for a plain name whose folder is a direct child of `Projects/`
+    /// (no "..", separators or symlink escapes). Names can come from the tablet.
+    public func isSafeProjectName(_ name: String) -> Bool {
+        guard Self.validName(name) == name else { return false }
+        let child = projectDir(name).standardizedFileURL.resolvingSymlinksInPath()
+        let parent = projectsDir.standardizedFileURL.resolvingSymlinksInPath()
+        return child.deletingLastPathComponent().path == parent.path
+    }
+
     @discardableResult
     public func ensureProject(_ name: String) throws -> URL {
+        guard isSafeProjectName(name) else { throw StorageError.invalidName(name) }
         let dir = projectDir(name)
         do {
             try fm.createDirectory(at: sessionsDir(name), withIntermediateDirectories: true)
