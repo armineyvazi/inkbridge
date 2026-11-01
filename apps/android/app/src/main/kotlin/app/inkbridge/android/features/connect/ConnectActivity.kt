@@ -87,7 +87,7 @@ class ConnectActivity : InkActivity() {
         codeField = null
         val c = Ink.column(this)
         c.add(Ink.title(this, "Pair with your Mac"))
-        c.add(Ink.body(this, "On the Mac, click the InkBridge pen in the menu bar and choose Connect Device… (⌃⌥K). Then choose that Mac here.")
+        c.add(Ink.body(this, "On the Mac, open InkBridge (or press ⌃⌥K, or click the pen in the menu bar) to see Connect Device and its code. Then choose that Mac here.")
             .apply { setTextColor(Ink.GREY) }, Ink.dp(this, Ink.S))
         error?.let { c.add(problem(it), Ink.dp(this, Ink.M)) }
         // A pairing that just failed (forgotten, certificate changed) is not offered as a shortcut:

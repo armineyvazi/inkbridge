@@ -50,7 +50,7 @@ FAILED: wrong code · code expired · Mac forgot this tablet · Mac identity cha
 
 The handshake is described in [ADR-007](../decisions/ADR-007-tls-pairing.md) and the [protocol spec](../protocol/protocol-specification.md).
 
-1. **Mac:** menu bar → Connect Device… (⌃⌥K). A one-time code appears, valid for 5 minutes, together with a QR link and the paired devices.
+1. **Mac:** Connect Device opens by itself while no tablet is paired, and whenever InkBridge is opened again (Finder, Spotlight, Launchpad). It is also on ⌃⌥K and in the menu-bar pen. It shows a one-time code (5 minutes), a QR link and the paired devices.
 2. **BOOX:** Connect to Mac. Discovered Macs are listed. Choose one, type the code, then Pair.
 3. **The Mac and tablet exchange proofs** bound to the TLS fingerprint. The Mac issues a token, and the tablet pins the certificate.
 4. **From then on,** the tablet reconnects by itself with the token. No window needs to be open on the Mac.

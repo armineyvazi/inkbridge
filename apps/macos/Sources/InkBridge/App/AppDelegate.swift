@@ -23,6 +23,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
         defaults.set(false, forKey: "cleanExit")
         menuBar = MenuBarController(coordinator: coordinator)
+        // First run (no tablet paired yet): show the pairing code right away instead of
+        // making people find the menu-bar icon, which a MacBook notch can hide.
+        if model.pairedDevices.isEmpty {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 1) { [weak self] in self?.coordinator.openConnectDevice() }
+        }
+    }
+
+    /// Opening InkBridge again (Finder, Spotlight, Launchpad) while it runs shows Connect Device:
+    /// a menu-bar utility has no other window to bring forward.
+    func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
+        coordinator.openConnectDevice()
+        return false
     }
 
     func applicationWillTerminate(_ notification: Notification) {
