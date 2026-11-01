@@ -296,7 +296,10 @@ class ConnectActivity : InkActivity() {
         c.add(Ink.infoRow(this, "Address", "$address:${link.port}"), 0)
         c.add(Ink.infoRow(this, "Certificate", fp), 0)
         c.add(Ink.caption(this, "The Mac's Connect Device window shows the same certificate."), Ink.dp(this, Ink.XS))
-        manager.paired.value?.takeIf { it.hostId != link.hostId }?.let {
+        // Compare the certificate, not the link's host id: a crafted link can copy the paired Mac's id,
+        // but TLS enforces the link's fingerprint, so it cannot fake that.
+        val linkPin = app.inkbridge.core.protocol.PairingAuth.toHex(link.fingerprint)
+        manager.paired.value?.takeIf { !it.fingerprintHex.equals(linkPin, ignoreCase = true) }?.let {
             c.add(problem("This replaces the pairing with ${it.name}."), Ink.dp(this, Ink.M))
         }
         c.add(Ink.button(this, "Pair", Ink.ButtonStyle.PRIMARY, R.drawable.ic_check) {

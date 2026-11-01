@@ -12,6 +12,7 @@ import app.inkbridge.android.features.canvas.CanvasView
 import app.inkbridge.android.features.connect.ConnectActivity
 import app.inkbridge.android.features.dashboard.DashboardActivity
 import app.inkbridge.android.features.diagnostics.DiagnosticsActivity
+import app.inkbridge.android.features.connection.PairingStore
 import app.inkbridge.android.features.settings.AppSettings
 import app.inkbridge.android.features.settings.SettingsActivity
 import app.inkbridge.core.connection.ConnectionMode
@@ -158,6 +159,28 @@ class UiTest {
         val req = assertNotNull(app.connection.pairing.value)
         assertEquals("Studio Mac", req.name)
         assertEquals(fp, req.pin!!.joinToString("") { "%02x".format(it) })
+    }
+
+    @Test
+    fun linkCopyingThePairedMacsIdStillWarnsWhenTheCertificateDiffers() {
+        app.getSharedPreferences("inkbridge-pairing", 0).edit()
+            .putString("hostId", "real-mac").putString("name", "My Mac").putString("fp", "11".repeat(32))
+            .putString("token", "22".repeat(32)).commit()
+        val exp = System.currentTimeMillis() / 1000 + 300
+        // Same host id as the paired Mac, different certificate: must still warn.
+        val link = "inkbridge://pair?v=3&name=My%20Mac&id=real-mac&addr=192.168.1.66&port=8766&code=K7QWM3XP&fp=${"a0".repeat(32)}&exp=$exp"
+        val a = buildConnect(link)
+        assertTrue("This replaces the pairing with My Mac." in a.window.decorView.texts(), a.window.decorView.texts().toString())
+    }
+
+    private fun buildConnect(link: String): ConnectActivity {
+        // Reload so the manager sees the pairing written above.
+        val m = app.connection
+        val f = m.javaClass.getDeclaredField("_paired").apply { isAccessible = true }
+        @Suppress("UNCHECKED_CAST")
+        (f.get(m) as kotlinx.coroutines.flow.MutableStateFlow<Any?>).value =
+            PairingStore(app).load()
+        return Robolectric.buildActivity(ConnectActivity::class.java, Intent(Intent.ACTION_VIEW, Uri.parse(link))).setup().get()
     }
 
     @Test
