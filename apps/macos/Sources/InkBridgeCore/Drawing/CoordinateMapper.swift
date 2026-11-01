@@ -108,7 +108,8 @@ public extension Viewport {
         let usable = 1 - 2 * margin
         let zx = bounds.width > 0 ? Double(surface.width) * usable / Double(bounds.width) : .infinity
         let zy = bounds.height > 0 ? Double(surface.height) * usable / Double(bounds.height) : .infinity
-        let zoom = min(max(min(zx, zy), zoomRange.lowerBound), zoomRange.upperBound)
+        // Never magnify past actual size: Fit on a few short strokes used to zoom to 1000 %+.
+        let zoom = min(max(min(zx, zy, 1), zoomRange.lowerBound), zoomRange.upperBound)
         let w = Double(surface.width) / zoom, h = Double(surface.height) / zoom
         return Viewport(x: Double(bounds.midX) - w / 2, y: Double(bounds.midY) - h / 2, zoom: zoom)
     }

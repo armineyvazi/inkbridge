@@ -68,6 +68,9 @@ class CanvasDocument {
 
     val size: Int get() = synchronized(lock) { strokes.size }
 
+    /** Strokes drawn here that have not fully reached the Mac yet (offline drawing). */
+    val unsentCount: Int get() = synchronized(lock) { pending.size }
+
     fun <T> read(block: (Collection<Stroke>) -> T): T = synchronized(lock) { block(strokes.values) }
 
     /** Copies of points [from, end) of a stroke, plus its style. Null if gone. */

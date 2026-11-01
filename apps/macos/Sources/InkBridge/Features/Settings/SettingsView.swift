@@ -7,6 +7,8 @@ struct SettingsView: View {
     var connectDevice: () -> Void
     var forget: (PairedDevice) -> Void
     var exportDiagnostics: () -> Void
+    @ObservedObject var storage: StorageController
+    var openStorage: () -> Void
 
     var body: some View {
         Form {
@@ -44,6 +46,12 @@ struct SettingsView: View {
                     Text("USB only").tag(PeerArbiter.Preference.usbOnly)
                     Text("Wi-Fi only").tag(PeerArbiter.Preference.wifiOnly)
                 }
+            }
+
+            Section("Storage") {
+                LabeledContent("Projects folder") { Text(StorageController.displayPath(storage.config.rootPath)).foregroundStyle(.secondary) }
+                LabeledContent("Status") { SaveStatusLabel(status: storage.status) }
+                Button("Projects & Storage…", action: openStorage)
             }
 
             Section("Display") {

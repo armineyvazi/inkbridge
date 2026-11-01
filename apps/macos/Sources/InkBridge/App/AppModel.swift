@@ -87,6 +87,8 @@ final class AppModel: ObservableObject {
     @Published var toolbarVisible: Bool { didSet { defaults.set(toolbarVisible, forKey: "toolbarVisible") } }
     /// The view of the infinite canvas currently shown (mirrors the tablet).
     @Published var viewport: Viewport = .home
+    /// What the Mac's mouse does over the drawing surface (the pen always draws).
+    @Published var pointerMode: PointerMode = .pointer
     /// Mirror of the document's background layer (the store is the source of truth).
     @Published var background: CanvasBackground = .overlay
     /// Colour Studio Canvas returns to when toggled on from the overlay.

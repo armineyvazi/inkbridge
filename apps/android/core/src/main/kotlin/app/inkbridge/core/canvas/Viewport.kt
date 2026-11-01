@@ -34,7 +34,9 @@ data class Viewport(val x: Double = 0.0, val y: Double = 0.0, val zoom: Double =
             val usable = 1 - 2 * margin
             val zx = if (bounds.width > 0) viewW * usable / bounds.width else Double.POSITIVE_INFINITY
             val zy = if (bounds.height > 0) viewH * usable / bounds.height else Double.POSITIVE_INFINITY
-            val z = minOf(zx, zy).coerceIn(ZOOM_RANGE)
+            // Fit shows everything; it never magnifies past actual size (a few short
+            // strokes would otherwise fill the screen at 1000 %+).
+            val z = minOf(zx, zy, 1.0).coerceIn(ZOOM_RANGE)
             return Viewport(bounds.centerX - viewW / z / 2, bounds.centerY - viewH / z / 2, z)
         }
     }

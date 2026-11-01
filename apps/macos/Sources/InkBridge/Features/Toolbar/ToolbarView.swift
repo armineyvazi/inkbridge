@@ -16,6 +16,28 @@ protocol ToolbarActions: AnyObject {
     func setBackground(_ background: CanvasBackground)
     /// nil = follow the screen the user clicks; otherwise pin to that display.
     func setDisplay(_ id: CGDirectDisplayID?)
+    /// What the Mac mouse does: use apps (pointer) or draw.
+    func setPointerMode(_ mode: PointerMode)
+    var storageController: StorageController { get }
+    func showStorage()
+}
+
+/// Save state at a glance; click for Projects & Storage.
+struct SaveGlyph: View {
+    @ObservedObject var storage: StorageController
+    var body: some View {
+        let (symbol, color, help): (String, Color, String) = {
+            switch storage.status {
+            case .empty: return ("doc", .secondary, "New session — nothing to save yet")
+            case .saved(let d): return ("checkmark.icloud", .green, "Saved \(d.formatted(date: .omitted, time: .shortened)) in \(storage.activeProject)")
+            case .saving: return ("arrow.triangle.2.circlepath", .secondary, "Saving…")
+            case .unsaved: return ("circle.fill", .orange, "Unsaved changes (autosave runs every few seconds)")
+            case .failed(let m): return ("exclamationmark.triangle.fill", .red, "Save failed: \(m)")
+            }
+        }()
+        Image(systemName: symbol).font(.system(size: storage.status == .unsaved ? 7 : 13)).foregroundStyle(color)
+            .frame(width: 22, height: 26).help(help)
+    }
 }
 
 /// The floating tool palette.
@@ -55,6 +77,7 @@ struct ToolbarView: View {
     @ViewBuilder private var expanded: some View {
         if !vertical { StatusBadge(model: model); separator }
         BackgroundButton(model: model, actions: actions)
+        pointerToggle
         separator
         toolButtons
         separator
@@ -69,11 +92,13 @@ struct ToolbarView: View {
         iconButton("house", "Home view, 1:1 with the screen (⌃⌥0)") { actions?.homeView() }
         iconButton(model.overlayVisible ? "eye" : "eye.slash", "Hide/show ink (⌃⌥O)") { actions?.toggleOverlay() }
         iconButton("square.and.arrow.down", "Save… (⌃⌥S)") { actions?.saveSession() }
+        if let storage = actions?.storageController { SaveGlyph(storage: storage) }
     }
 
     @ViewBuilder private var compact: some View {
         statusDot
         BackgroundButton(model: model, actions: actions)
+        pointerToggle
         toolButtons
         colorMenu
         iconButton("arrow.uturn.backward", "Undo (⌃⌥Z)", enabled: model.canUndo) { actions?.undo() }
@@ -99,6 +124,21 @@ struct ToolbarView: View {
     }
 
     // MARK: Pieces
+
+    /// Mouse: use the apps underneath, or draw. Always visible so the state is never a surprise.
+    private var pointerToggle: some View {
+        let drawing = model.pointerMode == .draw
+        return Button { actions?.setPointerMode(drawing ? .pointer : .draw) } label: {
+            Image(systemName: drawing ? "pencil.and.scribble" : "cursorarrow")
+                .frame(width: 28, height: 26)
+                .background(drawing ? Color.accentColor.opacity(0.25) : .clear)
+                .clipShape(RoundedRectangle(cornerRadius: 6))
+        }
+        .buttonStyle(.plain)
+        .help(drawing ? "Mouse draws — click to use apps again (⌃⌥D)"
+                      : (model.background.mode == .studio ? "Mouse pans the canvas — click to draw with the mouse (⌃⌥D)"
+                                                           : "Mouse uses the apps underneath — click to draw with the mouse (⌃⌥D)"))
+    }
 
     private var separator: some View {
         Rectangle().fill(.primary.opacity(0.15))
@@ -208,6 +248,7 @@ struct ToolbarView: View {
                 }
             }
             Divider()
+            Button("Projects & Storage… (⌃⌥J)") { actions?.showStorage() }
             Button("Settings…") { actions?.openSettings() }
             Button("Hide toolbar (⌃⌥T)") { actions?.hideToolbar() }
         } label: {

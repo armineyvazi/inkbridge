@@ -28,6 +28,16 @@ class BackgroundTest {
     }
 
     @Test
+    fun storageMessagesUseTheSharedFixtures() {
+        val st = (MessageCodec.decode(Fixtures.bytes("valid/storage.state.json")).payload as Payload.Storage).state
+        assertEquals("System Design", st.project)
+        assertEquals(listOf("~/Documents/InkBridge", "/Volumes/Work/InkBridge"), st.locations)
+        val req = MessageCodec.decode(Fixtures.bytes("valid/storage.request.json")).payload as Payload.StorageRequest
+        assertEquals("switch_project" to "System Design", req.action to req.name)
+        assertFailsWith<ProtocolException>("unknown actions are rejected") { MessageCodec.decode(Fixtures.bytes("invalid/bad-storage-action.json")) }
+    }
+
+    @Test
     fun hostRevisionsOnlyMoveForward() {
         val doc = CanvasDocument()
         var changes = 0

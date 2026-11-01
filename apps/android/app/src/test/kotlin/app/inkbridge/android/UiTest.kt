@@ -23,6 +23,8 @@ import app.inkbridge.core.protocol.InkPoint
 import app.inkbridge.core.protocol.WireStyle
 import app.inkbridge.core.canvas.CanvasBackground
 import app.inkbridge.core.protocol.Payload
+import app.inkbridge.android.features.storage.StorageActivity
+import app.inkbridge.core.protocol.StorageState
 import org.junit.Before
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -32,6 +34,7 @@ import org.robolectric.Shadows.shadowOf
 import org.robolectric.annotation.Config
 import org.robolectric.shadows.ShadowLooper
 import kotlin.test.assertEquals
+import kotlin.test.assertFalse
 import kotlin.test.assertNotNull
 import kotlin.test.assertNull
 import kotlin.test.assertTrue
@@ -251,6 +254,24 @@ class UiTest {
         val before = app.connection.document.backgroundRevision
         handler(Payload.Background(CanvasBackground.studio(CanvasBackground.BLACK), before + 1))
         assertEquals(CanvasBackground.BLACK, app.connection.document.background.argb)
+    }
+
+    @Test
+    fun storageScreenShowsMacLocationAndRefusesChangesWhileOffline() {
+        val a0 = Robolectric.buildActivity(StorageActivity::class.java).setup().get()
+        idle()
+        assertTrue("Not connected yet" in a0.window.decorView.texts())
+        app.connection.defaultHostHandler(Payload.Storage(StorageState(
+            "System Design", "Payments", "~/Documents/InkBridge/Projects/System Design", "saved", 1_793_448_000_000, null,
+            listOf("My Drawings", "System Design"), listOf("~/Documents/InkBridge", "/Volumes/Work/InkBridge"), 3)))
+        idle()
+        val a = Robolectric.buildActivity(StorageActivity::class.java).setup().get()
+        idle()
+        val t = a.window.decorView.texts()
+        assertTrue("System Design" in t && "~/Documents/InkBridge/Projects/System Design" in t, t.toString())
+        assertTrue(t.any { it.startsWith("Offline") }, "never claims the Mac's status while offline")
+        assertFalse(app.connection.requestStorage("new_session"), "storage changes need the Mac")
+        assertNull(app.connection.storageRequest.value)
     }
 
     @Test

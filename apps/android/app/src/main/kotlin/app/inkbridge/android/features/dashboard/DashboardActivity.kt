@@ -42,6 +42,9 @@ class DashboardActivity : InkActivity() {
     private lateinit var lastRow: View
     private lateinit var canvasRow: View
     private lateinit var stylusRow: View
+    private lateinit var saveProject: View
+    private lateinit var saveWhere: View
+    private lateinit var saveStatus: View
     private var lastTone: Tone? = null
     private var lastPrimary: Triple<PrimaryAction, Boolean, Boolean>? = null
 
@@ -49,6 +52,22 @@ class DashboardActivity : InkActivity() {
         super.onCreate(savedInstanceState)
         setContentView(build())
         observe(manager.status) { render(it) }
+        // The Mac's resync arrives after onStart; keep the stroke count current.
+        observe(manager.client.state) { updateCanvasCount() }
+        observe(combine(manager.storage, manager.client.state) { st, cs -> st to cs }) { (st, cs) ->
+            val unsent = manager.document.unsentCount
+            Ink.setValue(saveProject, st?.let { "${it.project} › ${it.session}" } ?: "Connect to your Mac")
+            Ink.setValue(saveWhere, st?.location ?: "—")
+            Ink.setValue(saveStatus, when {
+                st == null -> if (unsent > 0) "$unsent strokes kept on this tablet" else "—"
+                cs !is ClientState.Ready -> "Offline" + if (unsent > 0) " · $unsent strokes waiting" else ""
+                st.status == "empty" -> "New session"
+                st.status == "saved" -> "Saved" + if (st.savedAtMs > 0) " " + DateUtils.getRelativeTimeSpanString(st.savedAtMs) else ""
+                st.status == "saving" -> "Saving…"
+                st.status == "unsaved" -> "Changes not saved yet"
+                else -> "Save failed — open Projects & storage"
+            })
+        }
         observe(combine(manager.paired, manager.client.state) { p, s -> p to s }) { (p, s) ->
             Ink.setValue(macRow, p?.name ?: if (manager.settings.mode == ConnectionMode.USB) "Over USB" else "Not paired")
             Ink.setValue(viaRow, via(s))
@@ -60,7 +79,12 @@ class DashboardActivity : InkActivity() {
 
     override fun onStart() {
         super.onStart()
-        val n = manager.document.read { it.size }
+        updateCanvasCount()
+        canvasRow.postDelayed(::updateCanvasCount, 1_500)  // after a reconnect resync lands
+    }
+
+    private fun updateCanvasCount() {
+        val n = manager.document.size
         Ink.setValue(canvasRow, if (n == 0) "Empty" else "$n stroke${if (n == 1) "" else "s"}")
     }
 
@@ -105,6 +129,18 @@ class DashboardActivity : InkActivity() {
         drawing.add(canvasRow).add(stylusRow, 0)
         drawing.add(Ink.infoRow(this, "Ink on tablet", if (manager.settings.showLocalInk) "Visible" else "Hidden"), 0)
         c.add(drawing, Ink.dp(this, Ink.M))
+
+        // Saving (the Mac owns the files)
+        val saving = Ink.card(this)
+        saving.add(Ink.heading(this, "Saving"))
+        saveProject = Ink.infoRow(this, "Project", "")
+        saveWhere = Ink.infoRow(this, "On your Mac", "")
+        saveStatus = Ink.infoRow(this, "Status", "")
+        saving.add(saveProject).add(saveWhere, 0).add(saveStatus, 0)
+        saving.add(Ink.button(this, "Projects & storage", Ink.ButtonStyle.GHOST) {
+            open<app.inkbridge.android.features.storage.StorageActivity>()
+        }, Ink.dp(this, Ink.XS))
+        c.add(saving, Ink.dp(this, Ink.M))
 
         // Navigation
         c.add(Ink.section(this, "More"), Ink.dp(this, Ink.S))

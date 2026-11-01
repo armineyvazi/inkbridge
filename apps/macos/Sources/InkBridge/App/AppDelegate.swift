@@ -8,6 +8,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private let defaults = UserDefaults.standard
 
     func applicationDidFinishLaunching(_ notification: Notification) {
+        if CommandLine.arguments.contains("--self-test") {
+            exit(SelfTest.run())
+        }
         // A menu-bar utility: no Dock icon, never steals focus by launching.
         NSApp.setActivationPolicy(.accessory)
 
@@ -15,11 +18,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // If the last run did not exit cleanly, continue its session so
         // strokes drawn before the crash come back.
         let crashed = defaults.object(forKey: "cleanExit") as? Bool == false
-        let lastSession = defaults.string(forKey: "lastSessionID")
-        coordinator = InkCoordinator(model: model, sessionID: crashed ? lastSession : nil)
+        coordinator = InkCoordinator(model: model)
         coordinator.start()
-        if crashed, let lastSession, coordinator.restore(sessionID: lastSession) {
-            model.statusMessage = "Recovered unsaved session"
+        if crashed, coordinator.restoreLastSession() {
+            model.statusMessage = "Recovered your last session"
         }
         defaults.set(false, forKey: "cleanExit")
         menuBar = MenuBarController(coordinator: coordinator)

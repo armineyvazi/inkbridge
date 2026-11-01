@@ -94,9 +94,34 @@ class ConnectionManager(private val ctx: Context) {
     }.stateIn(scope, SharingStarted.Eagerly, ConnectionStatus.describe(
         ConnectionFacts(settings.mode, _paired.value?.name, false, 0, null, null, false, false)))
 
+    private val _storage = MutableStateFlow<app.inkbridge.core.protocol.StorageState?>(null)
+    /** What the Mac is saving to; null until a Mac has told us (it owns the files). */
+    val storage: StateFlow<app.inkbridge.core.protocol.StorageState?> = _storage.asStateFlow()
+
+    private val _storageRequest = MutableStateFlow<String?>(null)
+    /** A storage change asked of the Mac and not yet answered. */
+    val storageRequest: StateFlow<String?> = _storageRequest.asStateFlow()
+
+    /** Asks the Mac to change storage. Only while connected: the Mac validates and answers. */
+    fun requestStorage(action: String, name: String? = null): Boolean {
+        if (client.state.value !is ClientState.Ready) return false
+        _storageRequest.value = action
+        client.submitStorageRequest(action, name)
+        return true
+    }
+
     /** Mirrors every host document message, whichever screen is showing. The canvas adds viewport handling. */
     val defaultHostHandler: (app.inkbridge.core.protocol.Payload) -> Unit = { p ->
-        if (p !is app.inkbridge.core.protocol.Payload.CanvasViewport) document.applyHost(p)
+        when (p) {
+            is app.inkbridge.core.protocol.Payload.Storage -> scope.launch {
+                // One ordered TCP stream per connection, and a restarted Mac restarts its
+                // revisions, so the latest message is simply the truth.
+                _storage.value = p.state
+                _storageRequest.value = null
+            }
+            is app.inkbridge.core.protocol.Payload.CanvasViewport -> Unit
+            else -> document.applyHost(p)
+        }
     }
 
     init {

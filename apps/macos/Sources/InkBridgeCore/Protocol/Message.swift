@@ -121,6 +121,31 @@ public enum AuthMode: String, Sendable {
     case token
 }
 
+/// What the tablet shows about storage. The Mac owns the files; paths are
+/// display strings only (the tablet cannot open Mac paths).
+public struct StorageState: Equatable, Sendable {
+    public var project: String
+    public var session: String
+    /// Where the project lives on the Mac, e.g. "~/Documents/InkBridge/Projects/A".
+    public var location: String
+    /// "saved" | "saving" | "unsaved" | "failed"
+    public var status: String
+    /// Unix ms of the last successful save, 0 if none.
+    public var savedAtMs: Int64
+    /// Human-readable reason when `status` is "failed".
+    public var error: String?
+    public var projects: [String]
+    /// Storage roots the tablet may switch to (validated again by the Mac).
+    public var locations: [String]
+    public var revision: UInt64
+
+    public init(project: String, session: String, location: String, status: String, savedAtMs: Int64, error: String?,
+                projects: [String], locations: [String], revision: UInt64) {
+        self.project = project; self.session = session; self.location = location; self.status = status
+        self.savedAtMs = savedAtMs; self.error = error; self.projects = projects; self.locations = locations; self.revision = revision
+    }
+}
+
 /// The typed body of a protocol message.
 public enum Payload: Equatable, Sendable {
     /// `hostID` is the Mac's stable identity, so a device can tell which Mac it reached.
@@ -148,6 +173,11 @@ public enum Payload: Equatable, Sendable {
     /// revision (apply only if newer). Device → host is a request; the host applies
     /// it, bumps the revision and echoes it back (the host is the single writer).
     case canvasBackground(CanvasBackground, revision: UInt64)
+    /// Host → device: project, session, save status (sent on change and on connect).
+    case storageState(StorageState)
+    /// Device → host: "save_now" | "new_session" | "switch_project" | "create_project" | "use_location".
+    /// The Mac validates and applies, then answers with `storage.state`.
+    case storageRequest(action: String, name: String?)
     /// Device → host: undo / redo / clear the document.
     case canvasCommand(CanvasCommand)
     /// Host → device: drop every confirmed stroke before a full resync.
@@ -178,6 +208,8 @@ public enum Payload: Equatable, Sendable {
         case .strokeStyle: return "stroke.style"
         case .canvasViewport: return "canvas.viewport"
         case .canvasBackground: return "canvas.background"
+        case .storageState: return "storage.state"
+        case .storageRequest: return "storage.request"
         case .canvasCommand: return "canvas.command"
         case .docReset: return "doc.reset"
         case .docRemove: return "doc.remove"

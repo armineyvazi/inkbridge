@@ -19,7 +19,9 @@ final class InkCoordinator: NSObject {
     private var peers: [UUID: PeerInfo] = [:]
     private var sync = DocumentSync()
     let server: InkServer
-    let sessionID: String
+    private(set) var sessionID: String
+    private(set) lazy var storage = StorageController(coordinator: self)
+    private(set) lazy var storageWindow = StorageWindowController(coordinator: self)
     let sessionStarted = Date()
     let log = Logger(subsystem: "app.inkbridge", category: "coordinator")
 
@@ -68,7 +70,110 @@ final class InkCoordinator: NSObject {
         }
     }
 
+    var interaction: WindowInteraction {
+        WindowInteraction.resolve(workspace: store.background.mode, pointer: model.pointerMode)
+    }
+
+    /// Pushes the interaction policy into the window and view.
+    func applyInteraction() {
+        let w = interaction
+        overlayWindow?.apply(w, studio: store.background.mode == .studio)
+        overlayView?.crosshair = w.mouseDraws
+        // A studio surface takes the keyboard so Esc / ⌘Z work; the overlay never does.
+        if w.canBecomeKey, let win = overlayWindow {
+            NSApp.activate(ignoringOtherApps: true)
+            win.makeKey()
+            win.makeFirstResponder(overlayView)
+        }
+    }
+
+    func setPointerMode(_ mode: PointerMode) {
+        // Never change mode in the middle of a mouse stroke.
+        if case .some = mouseStrokes.activeID { finishMouseStroke() }
+        model.pointerMode = mode
+        applyInteraction()
+    }
+
+    // MARK: Mouse drawing, pan, zoom (Studio Canvas and overlay draw mode)
+
+    private var mouseStrokes = MouseStrokeBuilder()
+    private var lastPanPoint: CGPoint?
+
+    private func handleMouse(_ e: OverlayView.MouseEvent) {
+        let w = interaction
+        let mapper = overlayView.mapper
+        switch e {
+        case .down(let p):
+            if w.mouseDraws {
+                if case let .begin(id, point) = mouseStrokes.down(p, mapper: mapper, t: monotonicNowNs()) {
+                    let (tool, style) = resolveInCanvasUnits(model.tool)
+                    store.begin(id: id, tool: tool, style: style, point: point)
+                    overlayView.strokeDidUpdate(id, added: 1)
+                }
+            } else if w.mousePans {
+                lastPanPoint = p
+            }
+        case .drag(let p):
+            if w.mouseDraws, case let .append(id, pts)? = mouseStrokes.drag(p, mapper: mapper, t: monotonicNowNs()) {
+                if store.append(id: id, points: pts) != nil {
+                    if store.active[id]?.tool == .eraser { overlayView.needsDisplay = true } else { overlayView.strokeDidUpdate(id, added: pts.count) }
+                }
+            } else if w.mousePans, let last = lastPanPoint {
+                pan(p.x - last.x, p.y - last.y)
+                lastPanPoint = p
+            }
+        case .up:
+            finishMouseStroke()
+            lastPanPoint = nil
+        }
+    }
+
+    private func finishMouseStroke() {
+        guard case let .end(id)? = mouseStrokes.up() else { return }
+        store.end(id: id)
+        overlayView.needsDisplay = true
+        refreshEditState()
+        syncDocument()  // the tablet receives Mac strokes as document diffs
+    }
+
+    /// Moves the view by a drag/scroll delta in view points (content follows the pointer).
+    func pan(_ dx: CGFloat, _ dy: CGFloat) {
+        let scale = max(overlayView.mapper.scale, 1e-6)
+        var v = ingestor.viewport
+        v.x -= Double(dx) / scale
+        v.y -= Double(dy) / scale
+        setViewport(v)
+    }
+
+    func zoom(_ factor: Double, at p: CGPoint) {
+        let v = ingestor.viewport
+        let c = overlayView.mapper.unmap(p)
+        // `zoomed(by:focus:)` takes the focus in tablet view px.
+        let focus = CGPoint(x: (c.x - v.x) * v.zoom, y: (c.y - v.y) * v.zoom)
+        setViewport(v.zoomed(by: factor, focus: focus))
+    }
+
+    /// Keys while the studio has focus. Global ⌃⌥ shortcuts keep working everywhere.
+    private func handleKey(_ e: NSEvent) -> Bool {
+        let cmd = e.modifierFlags.contains(.command)
+        switch (e.keyCode, cmd) {
+        case (53, _):  // Esc: back to the desktop
+            setBackground(CanvasBackground(mode: .overlay, color: store.background.color, pattern: store.background.pattern))
+        case (6, true):  // ⌘Z / ⇧⌘Z
+            e.modifierFlags.contains(.shift) ? redo() : undo()
+        case (2, false): setPointerMode(model.pointerMode == .draw ? .pointer : .draw)  // D
+        case (24, _), (69, _): zoom(1.25, at: CGPoint(x: overlayView.bounds.midX, y: overlayView.bounds.midY))  // + / =
+        case (27, _), (78, _): zoom(0.8, at: CGPoint(x: overlayView.bounds.midX, y: overlayView.bounds.midY))   // -
+        case (29, false): homeView()  // 0
+        default: return false
+        }
+        return true
+    }
+
     private func mouseClicked() {
+        // Only a click-through overlay may follow the user's clicks to another display;
+        // an opaque or click-catching surface would jump onto the monitor they want to use.
+        guard interaction.followsClicks else { return }
         guard model.followMouse, let screen = DisplayManager.screenUnderMouse(),
               let id = DisplayManager.displayID(of: screen), id != followedDisplayID else { return }
         followedDisplayID = id
@@ -145,13 +250,15 @@ final class InkCoordinator: NSObject {
         observeModel()
         server.start()
         networkWatcher.start()
-        autosaveTimer = Timer.scheduledTimer(withTimeInterval: 5, repeats: true) { [weak self] _ in self?.autosave() }
+        _ = storage  // load storage config, create the active project
+        autosaveTimer = Timer.scheduledTimer(withTimeInterval: 3, repeats: true) { [weak self] _ in self?.autosave() }
         NotificationCenter.default.addObserver(self, selector: #selector(screensChanged),
                                                name: NSApplication.didChangeScreenParametersNotification, object: nil)
     }
 
     func stop() {
-        autosave()
+        // Quitting: write synchronously so the data is on disk before the process ends.
+        try? storage.saveNow()
         server.stop()
     }
 
@@ -173,7 +280,11 @@ final class InkCoordinator: NSObject {
         overlayView = OverlayView(store: store, mapper: mapper(for: screen))
         overlayView.onDraw = { [weak self] ns in self?.didDraw(at: ns) }
         overlayWindow = OverlayWindow(screen: screen, content: overlayView)
-        overlayWindow?.setStudio(store.background.mode == .studio)
+        overlayView.onMouse = { [weak self] e in self?.handleMouse(e) }
+        overlayView.onPan = { [weak self] dx, dy in self?.pan(dx, dy) }
+        overlayView.onZoom = { [weak self] f, p in self?.zoom(f, at: p) }
+        overlayView.onKey = { [weak self] e in self?.handleKey(e) ?? false }
+        applyInteraction()
         overlayWindow?.orderFrontRegardless()
         updateEraserRadius()
     }
@@ -219,6 +330,7 @@ final class InkCoordinator: NSObject {
     func refreshEditState() {
         model.canUndo = store.canUndo
         model.canRedo = store.canRedo
+        storage.documentChanged()
     }
 
     // MARK: Document sync (host → tablet)
@@ -228,6 +340,33 @@ final class InkCoordinator: NSObject {
         guard let peer = activePeer else { return }
         send(sync.diff(store.strokes), to: peer)
         syncBackground()
+    }
+
+    /// Tells the active tablet the storage state (project, session, save status).
+    func sendStorageState() {
+        guard let peer = activePeer else { return }
+        server.send(.storageState(storage.state()), to: peer.id)
+    }
+
+    /// Replaces the open document (new or opened session). The tablet gets a full resync.
+    func startSession(id: String, strokes: [Stroke], background: CanvasBackground, viewport: Viewport) {
+        store.endAll()
+        store.load(strokes, background: background)
+        sessionID = id
+        server.setSessionID(id)
+        ingestor.viewport = viewport
+        backgroundDidChange()
+        relayoutOverlay()
+        overlayView?.invalidateCache()
+        refreshEditState()
+        autosavedRevision = store.documentVersion
+        if let peer = activePeer {
+            sync.reset()
+            send(sync.resync(store.strokes), to: peer)
+            sentBackgroundRevision = nil
+            syncBackground()
+            server.send(.canvasViewport(viewport), to: peer.id)
+        }
     }
 
     /// Revision of the background the active tablet last received.
@@ -246,7 +385,7 @@ final class InkCoordinator: NSObject {
         guard model.background != bg else { return }
         model.background = bg
         if bg.mode == .studio { model.lastStudioColor = bg.color }
-        overlayWindow?.setStudio(bg.mode == .studio)
+        applyInteraction()
         overlayView?.needsDisplay = true
     }
 
@@ -344,6 +483,8 @@ extension InkCoordinator: InkServerDelegate {
         case let .strokeEnd(id):
             // The tablet already has its own stroke; diff only reports it if the Mac dropped it.
             sync.markKnown(id)
+        case let .storageRequest(action, name):
+            storage.handle(action: action, name: name)
         case let .canvasBackground(bg, _):
             // A request from the tablet. The Mac is the single writer: apply it (one undo
             // step), then echo the result with the new revision so both sides converge,
@@ -424,6 +565,7 @@ extension InkCoordinator: InkServerDelegate {
             send(sync.resync(store.strokes), to: peer)
             sentBackgroundRevision = nil
             syncBackground()
+            server.send(.storageState(storage.state()), to: peer.id)
         }
         relayoutOverlay()
     }

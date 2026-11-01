@@ -51,5 +51,6 @@
 
         <activity android:name=".features.settings.SettingsActivity" android:exported="false" />
         <activity android:name=".features.diagnostics.DiagnosticsActivity" android:exported="false" />
+        <activity android:name=".features.storage.StorageActivity" android:exported="false" />
     </application>
 </manifest>

@@ -118,4 +118,13 @@ class CanvasDocumentTest {
         d.clearLocal()
         assertEquals(0, d.size)
     }
+
+    @Test
+    fun fitNeverMagnifiesPastActualSize() {
+        // Regression: one short stroke made Fit zoom to 1138 % on the BOOX.
+        val v = app.inkbridge.core.canvas.Viewport.fitting(app.inkbridge.core.canvas.Bounds(100.0, 100.0, 140.0, 120.0), 1404, 1872)
+        kotlin.test.assertEquals(1.0, v.zoom)
+        val big = app.inkbridge.core.canvas.Viewport.fitting(app.inkbridge.core.canvas.Bounds(0.0, 0.0, 14040.0, 18720.0), 1404, 1872)
+        kotlin.test.assertTrue(big.zoom < 0.11, "large drawings still zoom out to fit")
+    }
 }

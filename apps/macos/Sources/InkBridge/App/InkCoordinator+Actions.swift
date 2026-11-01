@@ -35,6 +35,8 @@ extension InkCoordinator: ToolbarActions {
     }
 
     func showToolbar() { toolbar.setVisible(true) }
+    var storageController: StorageController { storage }
+    func showStorage() { storageWindow.show() }
     func hideToolbar() { toolbar.setVisible(false) }
     func toggleToolbar() { toolbar.setVisible(!model.toolbarVisible) }
     var isToolbarVisible: Bool { model.toolbarVisible }
@@ -55,7 +57,8 @@ extension InkCoordinator: ToolbarActions {
         if settingsWindow == nil {
             let view = SettingsView(model: model, connectDevice: { [weak self] in self?.openConnectDevice() },
                                     forget: { [weak self] in self?.forget($0) },
-                                    exportDiagnostics: { [weak self] in self?.exportDiagnostics() })
+                                    exportDiagnostics: { [weak self] in self?.exportDiagnostics() },
+                                    storage: storage, openStorage: { [weak self] in self?.storageWindow.show() })
             let window = NSWindow(contentViewController: NSHostingController(rootView: view))
             window.title = "InkBridge Settings"
             window.styleMask = [.titled, .closable]
@@ -106,6 +109,11 @@ extension InkCoordinator: ToolbarActions {
         keys.register(kVK_ANSI_0) { [weak self] in self?.homeView() }
         keys.register(kVK_ANSI_K) { [weak self] in self?.openConnectDevice() }
         keys.register(kVK_ANSI_B) { [weak self] in self?.toggleStudio() }
+        keys.register(kVK_ANSI_J) { [weak self] in self?.storageWindow.show() }
+        keys.register(kVK_ANSI_D) { [weak self] in
+            guard let self else { return }
+            self.setPointerMode(self.model.pointerMode == .draw ? .pointer : .draw)
+        }
         keys.register(kVK_ANSI_B, modifiers: HotKeyCenter.controlOptionShift) { [weak self] in self?.swapStudioBlackWhite() }
     }
 
@@ -116,7 +124,6 @@ extension InkCoordinator: ToolbarActions {
             .appendingPathComponent("InkBridge")
     }
 
-    static var sessionsDirectory: URL { supportDirectory.appendingPathComponent("Sessions") }
 
     var overlayDisplayID: CGDirectDisplayID? {
         targetScreen.flatMap(DisplayManager.displayID(of:))
@@ -125,7 +132,7 @@ extension InkCoordinator: ToolbarActions {
     func makeMetadata() -> SessionMetadata {
         let screen = targetScreen
         return SessionMetadata(
-            id: sessionID, title: sessionID, startedAt: sessionStarted, savedAt: Date(),
+            id: sessionID, title: storage.sessionTitle, startedAt: sessionStarted, savedAt: Date(),
             deviceName: model.connection.deviceName, displayName: screen?.localizedName,
             mapper: overlayView.mapper, strokeCount: store.strokes.count, background: store.background
         )
@@ -134,27 +141,13 @@ extension InkCoordinator: ToolbarActions {
     /// Writes vector strokes only (no renders) so it is cheap to run often.
     /// Combined with the clean-exit flag this gives crash recovery.
     func autosave() {
-        guard store.documentVersion != autosavedRevision else { return }
-        autosavedRevision = store.documentVersion
-        let dir = Self.sessionsDirectory.appendingPathComponent(sessionID)
-        do {
-            try SessionArchive.writeStrokes(store.strokes, metadata: makeMetadata(), to: dir)
-            UserDefaults.standard.set(sessionID, forKey: "lastSessionID")
-        } catch {
-            model.statusMessage = "Autosave failed: \(error.localizedDescription)"
-        }
+        storage.save()
     }
 
-    /// Restores the previous session's strokes into the store.
-    func restore(sessionID: String) -> Bool {
-        let dir = Self.sessionsDirectory.appendingPathComponent(sessionID)
-        guard let (meta, strokes) = try? SessionArchive.load(from: dir), !strokes.isEmpty else { return false }
-        store.load(strokes, background: meta.background)
-        backgroundDidChange()
-        ingestor.viewport = meta.viewport
-        relayoutOverlay()
-        autosavedRevision = store.documentVersion
-        overlayView?.needsDisplay = true
-        return true
+    /// Crash recovery: reopens the last session that was being saved.
+    func restoreLastSession() -> Bool {
+        guard let project = UserDefaults.standard.string(forKey: "lastSessionProject"),
+              let id = UserDefaults.standard.string(forKey: "lastSessionID") else { return false }
+        return (try? storage.openSession(project: project, id: id)) != nil
     }
 }

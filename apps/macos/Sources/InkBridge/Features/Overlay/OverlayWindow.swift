@@ -1,4 +1,5 @@
 import AppKit
+import InkBridgeCore
 
 /// A transparent, click-through window covering one display.
 ///
@@ -24,19 +25,23 @@ final class OverlayWindow: NSWindow {
         move(to: screen)
     }
 
-    /// Studio Canvas is opaque and catches clicks, so they never land on apps
-    /// hidden underneath. Desktop Overlay is transparent and click-through.
-    func setStudio(_ studio: Bool) {
-        ignoresMouseEvents = !studio
+    private var mayBecomeKey = false
+
+    /// Applies the interaction policy (InteractionPolicy.swift).
+    func apply(_ interaction: WindowInteraction, studio: Bool) {
+        ignoresMouseEvents = interaction.clickThrough
         isOpaque = studio
+        mayBecomeKey = interaction.canBecomeKey
+        if !mayBecomeKey && isKeyWindow { resignKey() }
     }
 
     func move(to screen: NSScreen) {
         setFrame(screen.frame, display: true)
     }
 
-    // Never steal keyboard focus from the app being annotated.
-    override var canBecomeKey: Bool { false }
+    // The overlay never steals keyboard focus from the app being annotated;
+    // the studio may, so Esc / ⌘Z reach it.
+    override var canBecomeKey: Bool { mayBecomeKey }
     override var canBecomeMain: Bool { false }
 }
 

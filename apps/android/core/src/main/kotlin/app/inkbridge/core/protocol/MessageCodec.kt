@@ -90,6 +90,19 @@ object MessageCodec {
             "pattern" to JsonPrimitive(p.background.pattern.wire),
             "revision" to JsonPrimitive(p.revision),
         )
+        is Payload.Storage -> buildMap {
+            val st = p.state
+            put("project", JsonPrimitive(st.project)); put("session", JsonPrimitive(st.session))
+            put("location", JsonPrimitive(st.location)); put("status", JsonPrimitive(st.status))
+            put("saved_at_ms", JsonPrimitive(st.savedAtMs)); put("revision", JsonPrimitive(st.revision))
+            st.error?.let { put("error", JsonPrimitive(it)) }
+            put("projects", buildJsonArray { st.projects.forEach { add(JsonPrimitive(it)) } })
+            put("locations", buildJsonArray { st.locations.forEach { add(JsonPrimitive(it)) } })
+        }
+        is Payload.StorageRequest -> buildMap {
+            put("action", JsonPrimitive(p.action))
+            p.name?.let { put("name", JsonPrimitive(it)) }
+        }
         is Payload.Command -> mapOf("command" to JsonPrimitive(p.command.wire))
         is Payload.DocReset -> emptyMap()
         is Payload.DocRemove -> mapOf("stroke_ids" to buildJsonArray { p.strokeIds.forEach { add(JsonPrimitive(it)) } })
@@ -178,6 +191,18 @@ object MessageCodec {
                 app.inkbridge.core.canvas.CanvasBackground.Pattern.fromWire(f.string("pattern")) ?: throw ProtocolException("invalid field pattern"),
             ),
             f.nonNegativeLong("revision"),
+        )
+        "storage.state" -> Payload.Storage(StorageState(
+            f.string("project"), f.string("session"), f.string("location"),
+            f.string("status").also { if (it !in setOf("empty", "saved", "saving", "unsaved", "failed")) throw ProtocolException("invalid field status") },
+            f.long("saved_at_ms"), f.optionalString("error"),
+            f.stringArray("projects"), f.stringArray("locations"), f.nonNegativeLong("revision"),
+        ))
+        "storage.request" -> Payload.StorageRequest(
+            f.string("action").also {
+                if (it !in setOf("save_now", "new_session", "switch_project", "create_project", "use_location")) throw ProtocolException("invalid field action")
+            },
+            f.optionalString("name"),
         )
         "canvas.command" -> Payload.Command(
             CanvasCommand.fromWire(f.string("command")) ?: throw ProtocolException("invalid field command"),
@@ -311,6 +336,16 @@ private class Fields(val obj: JsonObject) {
         if (obj[key] == null || obj[key] is JsonNull) null else obj(key)
 
     fun tool(key: String): Tool = Tool.fromWire(string(key)) ?: throw ProtocolException("invalid field $key")
+
+    fun stringArray(key: String): List<String> {
+        val a = array(key)
+        if (a.size > MessageCodec.MAX_IDS_PER_MESSAGE) throw ProtocolException("invalid field $key")
+        return a.map { e ->
+            val p = e as? JsonPrimitive ?: throw ProtocolException("invalid field $key")
+            if (!p.isString || p.content.length > MessageCodec.MAX_STRING_LENGTH) throw ProtocolException("invalid field $key")
+            p.content
+        }
+    }
 
     fun array(key: String): JsonArray {
         val v = obj[key] ?: throw ProtocolException("missing field $key")

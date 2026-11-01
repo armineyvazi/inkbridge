@@ -60,6 +60,10 @@ fun main(args: Array<String>): Unit = runBlocking(Dispatchers.Default) {
     val doc = app.inkbridge.core.canvas.CanvasDocument()
     client.onHostPayload = { p ->
         doc.applyHost(p)
+        if (p is app.inkbridge.core.protocol.Payload.Storage) {
+            val st = p.state
+            println("storage from host: project=${st.project} session=${st.session} status=${st.status} location=${st.location} projects=${st.projects} revision=${st.revision}${st.error?.let { " error=$it" } ?: ""}")
+        }
         if (p is app.inkbridge.core.protocol.Payload.Background) {
             println("background from host: ${p.background.mode.wire} ${app.inkbridge.core.protocol.Colors.toHex(p.background.argb)} ${p.background.pattern.wire} revision ${p.revision}")
         }
@@ -81,6 +85,13 @@ fun main(args: Array<String>): Unit = runBlocking(Dispatchers.Default) {
         exitProcess(1)
     }
     println("connected: $ready")
+    opts["--storage-request"]?.let { spec ->
+        val (action, name) = spec.split(":", limit = 2).let { it[0] to it.getOrNull(1) }
+        delay(500)
+        client.submitStorageRequest(action, name)
+        println("storage requested: $action ${name ?: ""}")
+        delay(1_500)
+    }
     opts["--set-background"]?.let { spec ->
         val bg = when (spec) {
             "black" -> app.inkbridge.core.canvas.CanvasBackground.studio(app.inkbridge.core.canvas.CanvasBackground.BLACK)

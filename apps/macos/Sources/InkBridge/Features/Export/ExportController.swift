@@ -57,7 +57,11 @@ final class ExportController {
         panel.canCreateDirectories = true
         panel.showsTagField = false
         panel.isExtensionHidden = true
-        if let last = UserDefaults.standard.url(forKey: Self.lastFolderKey) { panel.directoryURL = last }
+        // A chosen export folder wins; otherwise the last folder used, else the project's exports/.
+        let storage = coordinator.storage
+        panel.directoryURL = storage.config.exportsPath != nil ? storage.exportsDirectory
+            : (UserDefaults.standard.url(forKey: Self.lastFolderKey) ?? storage.exportsDirectory)
+        try? FileManager.default.createDirectory(at: panel.directoryURL!, withIntermediateDirectories: true)
         panel.accessoryView = NSHostingView(rootView: ExportOptionsView(model: model, backgroundAvailable: background != nil,
                                                                           backgroundReason: backgroundReason))
         panel.level = NSWindow.Level(rawValue: NSWindow.Level.screenSaver.rawValue + 2)

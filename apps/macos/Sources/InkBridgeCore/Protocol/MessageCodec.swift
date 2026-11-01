@@ -97,6 +97,15 @@ public enum MessageCodec {
             return ["x": v.x, "y": v.y, "zoom": v.zoom]
         case let .canvasBackground(bg, revision):
             return ["mode": bg.mode.rawValue, "color": bg.color.hex, "pattern": bg.pattern.rawValue, "revision": revision]
+        case let .storageState(st):
+            var f: [String: Any] = ["project": st.project, "session": st.session, "location": st.location, "status": st.status,
+                                    "saved_at_ms": st.savedAtMs, "projects": st.projects, "locations": st.locations, "revision": st.revision]
+            if let e = st.error { f["error"] = e }
+            return f
+        case let .storageRequest(action, name):
+            var f: [String: Any] = ["action": action]
+            if let name { f["name"] = name }
+            return f
         case let .canvasCommand(c):
             return ["command": c.rawValue]
         case .docReset:
@@ -176,6 +185,21 @@ public enum MessageCodec {
             guard let pattern = CanvasBackground.Pattern(rawValue: try f.string("pattern")) else { throw ProtocolError.invalidField("pattern") }
             guard let color = RGBA(hex: try f.string("color")) else { throw ProtocolError.invalidField("color") }
             return .canvasBackground(CanvasBackground(mode: mode, color: color, pattern: pattern), revision: try f.uint64("revision"))
+        case "storage.state":
+            let status = try f.string("status")
+            guard ["empty", "saved", "saving", "unsaved", "failed"].contains(status) else { throw ProtocolError.invalidField("status") }
+            return .storageState(StorageState(
+                project: try f.string("project"), session: try f.string("session"), location: try f.string("location"),
+                status: status, savedAtMs: try f.int64("saved_at_ms"),
+                error: try f.optionalString("error"),
+                projects: try f.stringArray("projects"), locations: try f.stringArray("locations"),
+                revision: try f.uint64("revision")))
+        case "storage.request":
+            let action = try f.string("action")
+            guard ["save_now", "new_session", "switch_project", "create_project", "use_location"].contains(action) else {
+                throw ProtocolError.invalidField("action")
+            }
+            return .storageRequest(action: action, name: try f.optionalString("name"))
         case "canvas.command":
             guard let c = CanvasCommand(rawValue: try f.string("command")) else { throw ProtocolError.invalidField("command") }
             return .canvasCommand(c)
@@ -341,6 +365,15 @@ private struct Fields {
     func tool(_ key: String) throws -> Tool {
         guard let t = Tool(rawValue: try string(key)) else { throw ProtocolError.invalidField(key) }
         return t
+    }
+
+    func stringArray(_ key: String) throws -> [String] {
+        let raw = try array(key)
+        guard raw.count <= MessageCodec.maxIDsPerMessage else { throw ProtocolError.invalidField(key) }
+        return try raw.map { v in
+            guard let s = v as? String, s.count <= MessageCodec.maxStringLength else { throw ProtocolError.invalidField(key) }
+            return s
+        }
     }
 
     func array(_ key: String) throws -> [Any] {

@@ -15,6 +15,20 @@ final class OverlayView: NSView {
     /// Called at the end of each draw with the draw time, for latency stats.
     var onDraw: ((Int64) -> Void)?
 
+    // Mouse / trackpad input, routed to the coordinator. Only delivered when
+    // the window is not click-through (see WindowInteraction).
+    enum MouseEvent { case down(CGPoint), drag(CGPoint), up }
+    var onMouse: ((MouseEvent) -> Void)?
+    /// Scroll or two-finger pan, in view points.
+    var onPan: ((CGFloat, CGFloat) -> Void)?
+    /// Pinch: factor around a view point.
+    var onZoom: ((Double, CGPoint) -> Void)?
+    /// Key commands while the studio has focus; returns true if handled.
+    var onKey: ((NSEvent) -> Bool)?
+    var crosshair = false {
+        didSet { window?.invalidateCursorRects(for: self); if crosshair != oldValue { updateTrackingAreas() } }
+    }
+
     private var cache: CGImage?
     private var cacheRevision = -1
     private var laserTimer: Timer?
@@ -33,6 +47,39 @@ final class OverlayView: NSView {
     // Top-left origin, matching the normalized tablet coordinates.
     override var isFlipped: Bool { true }
     override var isOpaque: Bool { store.background.mode == .studio }
+
+    // MARK: Mouse
+
+    override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
+    override var acceptsFirstResponder: Bool { true }
+
+    override func mouseDown(with e: NSEvent) { onMouse?(.down(convert(e.locationInWindow, from: nil))) }
+    override func mouseDragged(with e: NSEvent) { onMouse?(.drag(convert(e.locationInWindow, from: nil))) }
+    override func mouseUp(with e: NSEvent) { onMouse?(.up) }
+
+    override func scrollWheel(with e: NSEvent) {
+        // Trackpads report precise deltas in points; wheels report lines.
+        let k: CGFloat = e.hasPreciseScrollingDeltas ? 1 : 12
+        onPan?(e.scrollingDeltaX * k, e.scrollingDeltaY * k)
+    }
+
+    override func magnify(with e: NSEvent) {
+        onZoom?(1 + Double(e.magnification), convert(e.locationInWindow, from: nil))
+    }
+
+    override func keyDown(with e: NSEvent) {
+        if onKey?(e) != true { super.keyDown(with: e) }
+    }
+
+    override func updateTrackingAreas() {
+        trackingAreas.forEach(removeTrackingArea)
+        addTrackingArea(NSTrackingArea(rect: bounds, options: [.cursorUpdate, .activeAlways, .inVisibleRect], owner: self))
+        super.updateTrackingAreas()
+    }
+
+    override func cursorUpdate(with event: NSEvent) {
+        (crosshair ? NSCursor.crosshair : NSCursor.arrow).set()
+    }
 
     func invalidateCache() {
         cacheRevision = -1

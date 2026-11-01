@@ -114,6 +114,14 @@ sealed interface Payload {
     data class Background(val background: app.inkbridge.core.canvas.CanvasBackground, val revision: Long) : Payload {
         override val type get() = "canvas.background"
     }
+    /** Host → device: what the Mac is saving to and how it is going (paths are display strings). */
+    data class Storage(val state: StorageState) : Payload {
+        override val type get() = "storage.state"
+    }
+    /** Device → host: save_now, new_session, switch_project, create_project, use_location. */
+    data class StorageRequest(val action: String, val name: String? = null) : Payload {
+        override val type get() = "storage.request"
+    }
     data class Command(val command: CanvasCommand) : Payload {
         override val type get() = "canvas.command"
     }
@@ -151,4 +159,17 @@ data class Message(
     val timestampNs: Long,
     val payload: Payload,
     val version: Int = PROTOCOL_VERSION,
+)
+
+/** Mirror of StorageState.swift. The Mac owns storage; the tablet only shows it and asks. */
+data class StorageState(
+    val project: String,
+    val session: String,
+    val location: String,
+    val status: String,
+    val savedAtMs: Long,
+    val error: String?,
+    val projects: List<String>,
+    val locations: List<String>,
+    val revision: Long,
 )

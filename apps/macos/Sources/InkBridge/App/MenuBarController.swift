@@ -67,13 +67,15 @@ final class MenuBarController: NSObject, NSMenuDelegate {
             menu.addItem(toolbarSubmenu("Draw On", options, #selector(setDisplay)))
         }
         add(menu, m.background.mode == .studio ? "Back to Desktop Overlay" : "Studio Canvas", #selector(toggleStudio), key: "b")
+        add(menu, m.pointerMode == .draw ? "Mouse: Use Apps (now Drawing)" : "Mouse: Draw (now Using Apps)", #selector(togglePointer), key: "d")
         menu.addItem(.separator())
         add(menu, m.overlayVisible ? "Hide Ink" : "Show Ink", #selector(toggleOverlay))
         add(menu, "Fit All Ink", #selector(fitAll))
         add(menu, "Home View", #selector(homeView))
         menu.addItem(.separator())
         add(menu, "Save…", #selector(save), key: "s")
-        add(menu, "Open Autosave Folder", #selector(openSessions))
+        add(menu, "Projects & Storage…", #selector(openStorage), key: "j")
+        menu.addItem(withTitle: "\(coordinator.storage.activeProject) › \(coordinator.storage.sessionTitle)", action: nil, keyEquivalent: "").isEnabled = false
         menu.addItem(.separator())
         add(menu, "Settings…", #selector(settings), key: ",")
         add(menu, "Export Diagnostic Report", #selector(diagnostics))
@@ -118,6 +120,9 @@ final class MenuBarController: NSObject, NSMenuDelegate {
     }
 
     @objc private func toggleStudio() { coordinator.toggleStudio() }
+    @objc private func togglePointer() {
+        coordinator.setPointerMode(coordinator.model.pointerMode == .draw ? .pointer : .draw)
+    }
     @objc private func toggleToolbar() { coordinator.toggleToolbar() }
     @objc private func toggleOverlay() { coordinator.toggleOverlay() }
     @objc private func fitAll() { coordinator.fitAll() }
@@ -127,8 +132,5 @@ final class MenuBarController: NSObject, NSMenuDelegate {
     @objc private func diagnostics() { coordinator.exportDiagnostics() }
     @objc private func quit() { NSApp.terminate(nil) }
 
-    @objc private func openSessions() {
-        try? FileManager.default.createDirectory(at: InkCoordinator.sessionsDirectory, withIntermediateDirectories: true)
-        NSWorkspace.shared.open(InkCoordinator.sessionsDirectory)
-    }
+    @objc private func openStorage() { coordinator.storageWindow.show() }
 }
