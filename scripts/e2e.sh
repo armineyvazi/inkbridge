@@ -25,6 +25,8 @@ make -s -C "$ROOT/apps/macos" release >/dev/null
 PROBE="$HOME/Library/Caches/InkBridge/macos-build/release/inkbridge-probe"
 EXPECT=(--expect-strokes "$STROKES")
 [ "$MODE" = wifi ] && EXPECT+=(--expect-pairings 1)
+# Background sync both ways: the tablet asks for black, later the Mac switches to white with graph paper.
+EXPECT+=(--push-background white:graph@4)
 "$PROBE" --seconds 25 --code "$CODE" "${EXPECT[@]}" >"$LOG" 2>&1 &
 PROBE_PID=$!
 trap 'kill $PROBE_PID 2>/dev/null || true' EXIT
@@ -32,9 +34,9 @@ sleep 1
 
 if [ "$MODE" = wifi ]; then
   HOST="$(ipconfig getifaddr en0 || ipconfig getifaddr en1 || echo 127.0.0.1)"
-  ARGS="--wifi $HOST --code $CODE --strokes $STROKES --reconnect"
+  ARGS="--wifi $HOST --code $CODE --strokes $STROKES --reconnect --set-background black"
 else
-  ARGS="--strokes $STROKES"
+  ARGS="--strokes $STROKES --set-background black"
 fi
 make -s -C "$ROOT/apps/android" simulate ARGS="$ARGS"
 

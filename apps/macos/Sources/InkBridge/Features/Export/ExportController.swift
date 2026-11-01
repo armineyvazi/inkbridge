@@ -29,6 +29,7 @@ final class ExportController {
 
     @MainActor
     private func captureBackground() async -> (CGImage?, String?) {
+        if coordinator.store.background.mode == .studio { return (nil, "Studio Canvas hides the desktop") }
         guard model.includeScreenshot else { return (nil, "screen background turned off in the save options") }
         guard CGPreflightScreenCaptureAccess() else {
             // Shows the system prompt the first time; the user has to relaunch after granting.
@@ -101,8 +102,10 @@ final class ExportController {
     private func reportSuccess(url: URL, result: ExportResult) {
         let alert = NSAlert()
         alert.messageText = "Saved “\(url.lastPathComponent)”"
-        var text = "Full page, transparent ink layer (PNG + SVG) and editable strokes were saved."
-        if !result.skipped.isEmpty {
+        var text = "Full page (image + PDF), transparent ink layer (PNG + SVG), background layer and editable strokes were saved."
+        if coordinator.store.background.mode == .studio {
+            text = "Full page on the Studio Canvas (image + PDF), the background layer on its own, the transparent ink layer (PNG + SVG) and editable strokes were saved."
+        } else if !result.skipped.isEmpty {
             let reasons = Set(result.skipped.values).sorted().joined(separator: "; ")
             text = "The ink layer (PNG + SVG), editable strokes and a preview were saved.\n\nNot included: the screen background and full-page image (\(reasons))."
         }
@@ -133,7 +136,12 @@ private struct ExportOptionsView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
-            Toggle("Include the screen behind the ink (full-page image)", isOn: $model.includeScreenshot)
+            if model.background.mode == .studio {
+                Text("Studio Canvas: the full page uses the canvas background; the desktop is not captured.")
+                    .font(.caption).foregroundStyle(.secondary)
+            } else {
+                Toggle("Include the screen behind the ink (full-page image)", isOn: $model.includeScreenshot)
+            }
             if model.includeScreenshot && !backgroundAvailable {
                 Text("Screen background unavailable: \(backgroundReason ?? "unknown"). The ink layer and strokes will still be saved.")
                     .font(.caption).foregroundStyle(.orange).fixedSize(horizontal: false, vertical: true)
@@ -144,8 +152,8 @@ private struct ExportOptionsView: View {
             }
             .pickerStyle(.radioGroup)
             .horizontalRadioGroupLayout()
-            .disabled(!model.includeScreenshot)
-            Text("Always saved: annotations.png (transparent), annotations.svg, strokes.json, metadata.")
+            .disabled(!model.includeScreenshot && model.background.mode != .studio)
+            Text("Always saved: annotations.png (transparent, never includes the background), annotations.svg, strokes.json, background layer, full-page.pdf, metadata.")
                 .font(.caption).foregroundStyle(.secondary)
         }
         .padding(12)

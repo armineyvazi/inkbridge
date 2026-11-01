@@ -28,7 +28,7 @@ import kotlin.system.exitProcess
  * A virtual tablet: drives the same StrokeProcessor and InkBridgeClient as
  * the Android app with synthetic pen input at the Note Air 3's surface size.
  *
- *   simulator [--wifi HOST] [--port N] [--code XXXX-XXXX] [--strokes N] [--hz 200] [--reconnect]
+ *   simulator [--wifi HOST] [--port N] [--code XXXX-XXXX] [--strokes N] [--hz 200] [--reconnect] [--set-background black|white|overlay]
  *
  * Without --wifi it connects to 127.0.0.1:8765, i.e. exactly where the
  * tablet's traffic lands through `adb reverse`. With --wifi it connects over
@@ -57,6 +57,13 @@ fun main(args: Array<String>): Unit = runBlocking(Dispatchers.Default) {
         },
         pingIntervalMs = 500,
     )
+    val doc = app.inkbridge.core.canvas.CanvasDocument()
+    client.onHostPayload = { p ->
+        doc.applyHost(p)
+        if (p is app.inkbridge.core.protocol.Payload.Background) {
+            println("background from host: ${p.background.mode.wire} ${app.inkbridge.core.protocol.Colors.toHex(p.background.argb)} ${p.background.pattern.wire} revision ${p.revision}")
+        }
+    }
     client.onPaired = {
         pairing = it
         println("paired with ${it.hostName}; pinned certificate ${it.fingerprint.take(8).joinToString(":") { b -> "%02X".format(b) }}")
@@ -74,6 +81,16 @@ fun main(args: Array<String>): Unit = runBlocking(Dispatchers.Default) {
         exitProcess(1)
     }
     println("connected: $ready")
+    opts["--set-background"]?.let { spec ->
+        val bg = when (spec) {
+            "black" -> app.inkbridge.core.canvas.CanvasBackground.studio(app.inkbridge.core.canvas.CanvasBackground.BLACK)
+            "white" -> app.inkbridge.core.canvas.CanvasBackground.studio(app.inkbridge.core.canvas.CanvasBackground.WHITE)
+            else -> app.inkbridge.core.canvas.CanvasBackground.OVERLAY
+        }
+        delay(300)
+        client.submitBackground(bg, doc.backgroundRevision)
+        println("background requested: $spec")
+    }
 
     val processor = StrokeProcessor(streamTag = client.streamId.take(8))
     val periodMs = 1000L / hz

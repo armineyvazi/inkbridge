@@ -144,6 +144,10 @@ public enum Payload: Equatable, Sendable {
     case strokeStyle(strokeID: String, tool: Tool, style: WireStyle)
     /// Either direction: the view moved.
     case canvasViewport(Viewport)
+    /// Either direction: the background layer. Host → device carries the host's
+    /// revision (apply only if newer). Device → host is a request; the host applies
+    /// it, bumps the revision and echoes it back (the host is the single writer).
+    case canvasBackground(CanvasBackground, revision: UInt64)
     /// Device → host: undo / redo / clear the document.
     case canvasCommand(CanvasCommand)
     /// Host → device: drop every confirmed stroke before a full resync.
@@ -173,6 +177,7 @@ public enum Payload: Equatable, Sendable {
         case .strokeCancel: return "stroke.cancel"
         case .strokeStyle: return "stroke.style"
         case .canvasViewport: return "canvas.viewport"
+        case .canvasBackground: return "canvas.background"
         case .canvasCommand: return "canvas.command"
         case .docReset: return "doc.reset"
         case .docRemove: return "doc.remove"

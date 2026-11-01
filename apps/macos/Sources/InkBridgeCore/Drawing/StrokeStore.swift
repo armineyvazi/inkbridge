@@ -14,6 +14,8 @@ public final class StrokeStore {
         /// Strokes removed by one eraser gesture, with their original indices.
         case erase([(index: Int, stroke: Stroke)])
         case clear([Stroke])
+        /// Background layer change; strokes are untouched.
+        case background(from: CanvasBackground, to: CanvasBackground)
     }
 
     public private(set) var strokes: [Stroke] = []
@@ -29,6 +31,14 @@ public final class StrokeStore {
 
     /// Bumped whenever `strokes` changes, so renderers can cache committed ink.
     public private(set) var revision = 0
+
+    /// The background layer. Independent of strokes: changing it never touches ink.
+    public private(set) var background = CanvasBackground.overlay
+    /// Bumped on every background change (including undo/redo). Sent with
+    /// `canvas.background` so a tablet never applies an older state over a newer one.
+    public private(set) var backgroundRevision: UInt64 = 0
+    /// Changes whenever strokes or background change; for autosave.
+    public var documentVersion: Int { revision + Int(backgroundRevision) }
 
     /// Eraser radius in canvas px. The coordinator converts the toolbar's
     /// on-screen size using the current zoom.
@@ -121,9 +131,28 @@ public final class StrokeStore {
         record(.clear(removed))
     }
 
+    /// Changes the background as one undoable step. Returns false if nothing changed.
+    @discardableResult
+    public func setBackground(_ bg: CanvasBackground) -> Bool {
+        guard bg != background else { return false }
+        let old = background
+        applyBackground(bg)
+        record(.background(from: old, to: bg))
+        return true
+    }
+
+    private func applyBackground(_ bg: CanvasBackground) {
+        background = bg
+        backgroundRevision += 1
+    }
+
     public func undo() {
         guard let command = undoStack.popLast() else { return }
         switch command {
+        case let .background(from, _):
+            applyBackground(from)
+            redoStack.append(command)
+            return
         case .add(let s):
             strokes.removeAll { $0.id == s.id }
         case .erase(let removed):
@@ -138,6 +167,10 @@ public final class StrokeStore {
     public func redo() {
         guard let command = redoStack.popLast() else { return }
         switch command {
+        case let .background(_, to):
+            applyBackground(to)
+            undoStack.append(command)
+            return
         case .add(let s):
             strokes.append(s)
         case .erase(let removed):
@@ -152,7 +185,8 @@ public final class StrokeStore {
     }
 
     /// Replaces the document, e.g. when restoring a saved session.
-    public func load(_ strokes: [Stroke]) {
+    public func load(_ strokes: [Stroke], background: CanvasBackground? = nil) {
+        if let background { applyBackground(background) }
         self.strokes = strokes
         active.removeAll()
         undoStack.removeAll()

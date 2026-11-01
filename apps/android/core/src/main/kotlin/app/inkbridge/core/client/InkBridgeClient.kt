@@ -211,6 +211,14 @@ class InkBridgeClient(
         }
     }
 
+    /**
+     * Asks the Mac to change the background. [knownRevision] is the last Mac
+     * revision this tablet saw; the Mac answers with the applied state.
+     */
+    fun submitBackground(bg: app.inkbridge.core.canvas.CanvasBackground, knownRevision: Long) {
+        if (outbox.trySend(Payload.Background(bg, knownRevision)).isFailure) droppedEvents.incrementAndGet()
+    }
+
     /** Asks the Mac to undo / redo / clear. The result comes back as document messages. */
     fun submitCommand(c: CanvasCommand) {
         if (outbox.trySend(Payload.Command(c)).isFailure) droppedEvents.incrementAndGet()
@@ -414,7 +422,7 @@ class InkBridgeClient(
                 onHostPayload?.invoke(p)
             }
             is Payload.StrokeBegin, is Payload.StrokePoints, is Payload.StrokeEnd, is Payload.StrokeStyle,
-            is Payload.DocReset, is Payload.DocRemove -> onHostPayload?.invoke(p)
+            is Payload.DocReset, is Payload.DocRemove, is Payload.Background -> onHostPayload?.invoke(p)
             else -> Unit
         }
     }
@@ -442,7 +450,7 @@ class InkBridgeClient(
     }
 
     private fun isDocument(p: Payload) = p is Payload.StrokeBegin || p is Payload.StrokePoints ||
-        p is Payload.StrokeEnd || p is Payload.StrokeCancel || p is Payload.Command
+        p is Payload.StrokeEnd || p is Payload.StrokeCancel || p is Payload.Command || p is Payload.Background
 
     private companion object {
         /** About a minute of continuous drawing at the BOOX's sample rate. */

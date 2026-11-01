@@ -8,7 +8,7 @@ import android.graphics.Rect
 import android.os.Handler
 import android.os.HandlerThread
 import android.view.SurfaceHolder
-import app.inkbridge.android.features.settings.CanvasBackground
+import app.inkbridge.core.canvas.CanvasBackground
 import app.inkbridge.core.canvas.Bounds
 import app.inkbridge.core.canvas.CanvasDocument
 import app.inkbridge.core.canvas.Viewport
@@ -42,6 +42,8 @@ class CanvasRenderer(private val document: CanvasDocument) {
     private var cacheCanvas: Canvas? = null
     private var cacheViewport: Viewport? = null
     private val drawnUpTo = HashMap<String, Int>()
+    /** Whether the last full render was on dark paper (ink is drawn light). */
+    private var dark = false
     private val paint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
         style = Paint.Style.STROKE
         strokeCap = Paint.Cap.ROUND
@@ -53,10 +55,11 @@ class CanvasRenderer(private val document: CanvasDocument) {
         private set
     @Volatile var inkVisible = true
         set(value) { field = value; requestFull() }
-    /** Paper pattern, anchored to canvas coordinates so it pans and zooms with the ink. */
-    @Volatile var background = CanvasBackground.BLANK
-        set(value) { field = value; requestFull() }
-    private val patternPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = 0xFF9A9A9A.toInt() }
+    /** Pattern lines; colour depends on the paper (see [drawBackground]). */
+    private val patternPaint = Paint(Paint.ANTI_ALIAS_FLAG)
+
+    /** The shared background layer, read from the document on every full redraw. */
+    private val background: CanvasBackground get() = document.background
     @Volatile private var preview: Viewport? = null
     private val pendingIds = LinkedHashSet<String>()
     private val fullRequested = AtomicBoolean(true)
@@ -131,8 +134,10 @@ class CanvasRenderer(private val document: CanvasDocument) {
         val v = viewport
         synchronized(pendingIds) { pendingIds.clear() }
         drawnUpTo.clear()
-        c.drawColor(Color.WHITE)
-        drawBackground(c, v, bmp.width, bmp.height)
+        val bg = background
+        c.drawColor(bg.einkPaper)
+        drawBackground(c, bg, v, bmp.width, bmp.height)
+        dark = bg.isDark
         if (inkVisible) {
             val visible = Bounds(v.x, v.y, v.x + bmp.width / v.zoom, v.y + bmp.height / v.zoom)
             // Copy what is visible under the lock, draw outside it.
@@ -171,7 +176,7 @@ class CanvasRenderer(private val document: CanvasDocument) {
         val cv = cacheViewport ?: return
         val canvas = h.lockCanvas() ?: return
         try {
-            canvas.drawColor(Color.WHITE)
+            canvas.drawColor(background.einkPaper)
             val s = (pv.zoom / cv.zoom).toFloat()
             canvas.translate(((cv.x - pv.x) * pv.zoom).toFloat(), ((cv.y - pv.y) * pv.zoom).toFloat())
             canvas.scale(s, s)
@@ -182,31 +187,34 @@ class CanvasRenderer(private val document: CanvasDocument) {
     }
 
     /**
-     * Dots or lines every 48 canvas px. Skipped when zoomed out so far that
-     * they would be closer than 12 screen px (a grey wash on e-ink).
+     * The shared paper pattern (same spacing as the Mac), anchored to canvas
+     * px. Lines closer than 8 screen px are skipped: on e-ink they would be a
+     * grey wash that slows every refresh.
      */
-    private fun drawBackground(c: Canvas, v: Viewport, w: Int, h: Int) {
-        val bg = background
-        if (bg == CanvasBackground.BLANK) return
-        val step = PATTERN * v.zoom
-        if (step < 12) return
-        val firstX = Math.floor(v.x / PATTERN) * PATTERN
-        val firstY = Math.floor(v.y / PATTERN) * PATTERN
-        var y = firstY
-        while (v.toViewY(y) <= h) {
-            val vy = v.toViewY(y)
-            if (bg == CanvasBackground.LINES) {
-                patternPaint.strokeWidth = 1f
-                c.drawLine(0f, vy, w.toFloat(), vy, patternPaint)
-            } else {
-                var x = firstX
-                while (v.toViewX(x) <= w) {
-                    c.drawCircle(v.toViewX(x), vy, 1.6f, patternPaint)
-                    x += PATTERN
-                }
-            }
-            y += PATTERN
+    private fun drawBackground(c: Canvas, bg: CanvasBackground, v: Viewport, w: Int, h: Int) {
+        val p = bg.pattern
+        if (p == CanvasBackground.Pattern.NONE) return
+        patternPaint.color = if (bg.isDark) 0xFF707070.toInt() else 0xFFA8A8A8.toInt()
+        val x0 = v.x
+        val y0 = v.y
+        val x1 = v.x + w / v.zoom
+        val y1 = v.y + h / v.zoom
+        fun each(from: Double, to: Double, step: Double, body: (Double) -> Unit) {
+            if (step * v.zoom < 8 || (to - from) / step > 2_000) return
+            var t = Math.floor(from / step) * step
+            while (t <= to) { body(t); t += step }
         }
+        if (p == CanvasBackground.Pattern.DOTS) {
+            each(y0, y1, p.minor) { y -> each(x0, x1, p.minor) { x -> c.drawCircle(v.toViewX(x), v.toViewY(y), 1.8f, patternPaint) } }
+            return
+        }
+        fun lines(step: Double, width: Float) {
+            patternPaint.strokeWidth = width
+            each(x0, x1, step) { x -> c.drawLine(v.toViewX(x), 0f, v.toViewX(x), h.toFloat(), patternPaint) }
+            each(y0, y1, step) { y -> c.drawLine(0f, v.toViewY(y), w.toFloat(), v.toViewY(y), patternPaint) }
+        }
+        lines(p.minor, 1f)
+        if (p.major > 0) lines(p.major, 2f)
     }
 
     /** Copies the cache to the surface; [dirty] null means the whole surface. */
@@ -225,11 +233,12 @@ class CanvasRenderer(private val document: CanvasDocument) {
         val r = Rect()
         if (pts.isEmpty()) return r
         val base = (style.width * v.zoom).toFloat()
+        // Monochrome ink that contrasts with the paper: white on a dark studio surface.
         when (tool) {
-            Tool.PEN -> paint.color = Color.BLACK
-            Tool.HIGHLIGHTER -> paint.color = Color.argb(0x70, 0x60, 0x60, 0x60)
+            Tool.PEN -> paint.color = if (dark) Color.WHITE else Color.BLACK
+            Tool.HIGHLIGHTER -> paint.color = if (dark) Color.argb(0x80, 0xB0, 0xB0, 0xB0) else Color.argb(0x70, 0x60, 0x60, 0x60)
             Tool.ERASER -> paint.color = Color.argb(0x90, 0xA0, 0xA0, 0xA0)
-            Tool.LASER -> paint.color = Color.DKGRAY
+            Tool.LASER -> paint.color = if (dark) Color.LTGRAY else Color.DKGRAY
         }
         val pressureSensitive = tool == Tool.PEN
         var px = v.toViewX(pts[from].x)
@@ -258,7 +267,4 @@ class CanvasRenderer(private val document: CanvasDocument) {
     private fun width(base: Float, p: Double, pressureSensitive: Boolean): Float =
         if (pressureSensitive) maxOf(base * (0.3f + 0.7f * p.toFloat().coerceIn(0f, 1f)), 1f) else maxOf(base, 1f)
 
-    private companion object {
-        const val PATTERN = 48.0
-    }
 }

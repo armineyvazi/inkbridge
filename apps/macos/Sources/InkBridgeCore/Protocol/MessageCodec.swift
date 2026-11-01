@@ -95,6 +95,8 @@ public enum MessageCodec {
             return ["stroke_id": id, "tool": tool.rawValue, "style": encode(style)]
         case let .canvasViewport(v):
             return ["x": v.x, "y": v.y, "zoom": v.zoom]
+        case let .canvasBackground(bg, revision):
+            return ["mode": bg.mode.rawValue, "color": bg.color.hex, "pattern": bg.pattern.rawValue, "revision": revision]
         case let .canvasCommand(c):
             return ["command": c.rawValue]
         case .docReset:
@@ -169,6 +171,11 @@ public enum MessageCodec {
                   coordinateRange.contains(x), coordinateRange.contains(y), Viewport.zoomRange.contains(zoom)
             else { throw ProtocolError.invalidField("viewport") }
             return .canvasViewport(Viewport(x: x, y: y, zoom: zoom))
+        case "canvas.background":
+            guard let mode = CanvasBackground.Mode(rawValue: try f.string("mode")) else { throw ProtocolError.invalidField("mode") }
+            guard let pattern = CanvasBackground.Pattern(rawValue: try f.string("pattern")) else { throw ProtocolError.invalidField("pattern") }
+            guard let color = RGBA(hex: try f.string("color")) else { throw ProtocolError.invalidField("color") }
+            return .canvasBackground(CanvasBackground(mode: mode, color: color, pattern: pattern), revision: try f.uint64("revision"))
         case "canvas.command":
             guard let c = CanvasCommand(rawValue: try f.string("command")) else { throw ProtocolError.invalidField("command") }
             return .canvasCommand(c)

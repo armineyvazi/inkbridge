@@ -32,7 +32,7 @@ final class OverlayView: NSView {
 
     // Top-left origin, matching the normalized tablet coordinates.
     override var isFlipped: Bool { true }
-    override var isOpaque: Bool { false }
+    override var isOpaque: Bool { store.background.mode == .studio }
 
     func invalidateCache() {
         cacheRevision = -1
@@ -52,6 +52,9 @@ final class OverlayView: NSView {
 
     override func draw(_ dirtyRect: NSRect) {
         guard let ctx = NSGraphicsContext.current?.cgContext else { return }
+        // Background layer first (own layer: never baked into the stroke cache).
+        if store.background.mode == .overlay { ctx.clear(dirtyRect) }
+        BackgroundRenderer.draw(store.background, in: ctx, mapper: mapper, rect: dirtyRect)
         if cacheRevision != store.revision { rebuildCache() }
         if let cache {
             // CGImages draw bottom-up; undo the view's flip for the blit.

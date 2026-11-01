@@ -93,6 +93,16 @@ adb reverse, p50 5 ms). Note Air 3 itself is still untested.
 | Router restart / IP change / Mac sleep on hardware | ⬜ |
 | Wi-Fi Direct / Mac-hosted network for different-network use | ⬜ future |
 
+## Design studio (2026-11-01 →)
+
+| Phase | Deliverable | Status |
+|---|---|---|
+| 1 | Dynamic backgrounds: Desktop Overlay / Studio Canvas, presets + custom colour, paper patterns, instant switching, undo, sync both ways (revisioned), persistence, layered export (+ PDF) | ✅ unit + e2e; ⏳ BOOX hardware + Mac UI by hand |
+| 2 | Tool sync both ways; pencil, marker, opacity; line, arrow, shapes (new `Shape` object) | ⬜ next |
+| 3 | Selection, lasso, move/resize/duplicate, shape recognition, full command history | ⬜ |
+| 4 | Layers, ruler, guides, snapping, text | ⬜ |
+| 5 | Large-canvas performance (spatial index), e-ink tuning, advanced export | ⬜ |
+
 ## Proposed next phase
 
 1. **Hardware session** (blocked only on USB debugging): fill in every pending row of

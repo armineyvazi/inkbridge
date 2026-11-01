@@ -11,9 +11,6 @@ import java.util.UUID
 /** Where the canvas opens. */
 enum class StartView(val label: String) { HOME("Actual size"), FIT("Fit all ink"), LAST("Where I left off") }
 
-/** Paper texture. Drawn by the tablet only; never sent to the Mac. */
-enum class CanvasBackground(val label: String) { BLANK("Blank"), DOTS("Dot grid"), LINES("Lines") }
-
 enum class TextSize(val label: String, val scale: Float) { NORMAL("Normal", 1f), LARGE("Large", 1.15f) }
 
 /** Every user preference, persisted in SharedPreferences. */
@@ -30,7 +27,6 @@ data class AppSettings(
     val startView: StartView = StartView.LAST,
     /** Ink on the tablet. On since the renderer moved off the UI thread (pen→Mac p95 59 → 15 ms). */
     val showLocalInk: Boolean = true,
-    val background: CanvasBackground = CanvasBackground.BLANK,
     /** A one-frame black flash after Clear and Fit, which removes e-ink ghosting. */
     val cleanRefresh: Boolean = true,
     val textSize: TextSize = TextSize.NORMAL,
@@ -55,7 +51,6 @@ data class AppSettings(
                 fingerNavigation = p.getBoolean("fingerNavigation", d.fingerNavigation),
                 startView = enum("startView", d.startView, StartView.entries.toTypedArray()),
                 showLocalInk = p.getBoolean("showLocalInk", d.showLocalInk),
-                background = enum("background", d.background, CanvasBackground.entries.toTypedArray()),
                 cleanRefresh = p.getBoolean("cleanRefresh", d.cleanRefresh),
                 textSize = enum("textSize", d.textSize, TextSize.entries.toTypedArray()),
                 lastViewport = Viewport(
@@ -85,7 +80,8 @@ data class AppSettings(
             .putBoolean("fingerNavigation", fingerNavigation)
             .putString("startView", startView.name)
             .putBoolean("showLocalInk", showLocalInk)
-            .putString("background", background.name)
+            // Paper patterns moved into the shared background layer (canvas ◐ button).
+            .remove("background")
             .putBoolean("cleanRefresh", cleanRefresh)
             .putString("textSize", textSize.name)
             .putFloat("vpX", lastViewport.x.toFloat())

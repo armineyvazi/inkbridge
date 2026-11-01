@@ -49,6 +49,23 @@ class CanvasDocument {
 
     var onChange: ((Change) -> Unit)? = null
 
+    /** The background layer as last confirmed by the Mac, or set optimistically here. */
+    @Volatile var background: CanvasBackground = CanvasBackground.OVERLAY
+        private set
+    /** The Mac revision [background] came from; older host messages are ignored. */
+    @Volatile var backgroundRevision: Long = 0
+        private set
+
+    /**
+     * Shows a background chosen on the tablet right away (e-ink feedback
+     * without a round trip). The Mac's echo then confirms or overrides it.
+     */
+    fun setBackgroundLocal(bg: CanvasBackground) {
+        if (bg == background) return
+        background = bg
+        onChange?.invoke(Change.Full)
+    }
+
     val size: Int get() = synchronized(lock) { strokes.size }
 
     fun <T> read(block: (Collection<Stroke>) -> T): T = synchronized(lock) { block(strokes.values) }
@@ -135,6 +152,12 @@ class CanvasDocument {
                     var any = false
                     p.strokeIds.forEach { if (strokes.remove(it) != null) any = true }
                     if (any) Change.Full else null
+                }
+                is Payload.Background -> {
+                    // Revisions only move forward: a delayed older message never wins.
+                    if (p.revision < backgroundRevision) return@synchronized null
+                    backgroundRevision = p.revision
+                    if (p.background == background) null else { background = p.background; Change.Full }
                 }
                 is Payload.DocReset -> {
                     strokes.keys.retainAll(pending)

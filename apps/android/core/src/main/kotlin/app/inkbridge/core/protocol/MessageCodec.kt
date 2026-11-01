@@ -84,6 +84,12 @@ object MessageCodec {
             "y" to JsonPrimitive(p.viewport.y),
             "zoom" to JsonPrimitive(p.viewport.zoom),
         )
+        is Payload.Background -> mapOf(
+            "mode" to JsonPrimitive(p.background.mode.wire),
+            "color" to JsonPrimitive(Colors.toHex(p.background.argb)),
+            "pattern" to JsonPrimitive(p.background.pattern.wire),
+            "revision" to JsonPrimitive(p.revision),
+        )
         is Payload.Command -> mapOf("command" to JsonPrimitive(p.command.wire))
         is Payload.DocReset -> emptyMap()
         is Payload.DocRemove -> mapOf("stroke_ids" to buildJsonArray { p.strokeIds.forEach { add(JsonPrimitive(it)) } })
@@ -165,6 +171,14 @@ object MessageCodec {
             ) throw ProtocolException("invalid field viewport")
             Payload.CanvasViewport(app.inkbridge.core.canvas.Viewport(x, y, z))
         }
+        "canvas.background" -> Payload.Background(
+            app.inkbridge.core.canvas.CanvasBackground(
+                app.inkbridge.core.canvas.CanvasBackground.Mode.fromWire(f.string("mode")) ?: throw ProtocolException("invalid field mode"),
+                Colors.fromHex(f.string("color")) ?: throw ProtocolException("invalid field color"),
+                app.inkbridge.core.canvas.CanvasBackground.Pattern.fromWire(f.string("pattern")) ?: throw ProtocolException("invalid field pattern"),
+            ),
+            f.nonNegativeLong("revision"),
+        )
         "canvas.command" -> Payload.Command(
             CanvasCommand.fromWire(f.string("command")) ?: throw ProtocolException("invalid field command"),
         )

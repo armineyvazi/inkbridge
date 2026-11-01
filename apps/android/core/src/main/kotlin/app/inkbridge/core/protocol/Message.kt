@@ -106,6 +106,14 @@ sealed interface Payload {
     data class CanvasViewport(val viewport: app.inkbridge.core.canvas.Viewport) : Payload {
         override val type get() = "canvas.viewport"
     }
+    /**
+     * Either direction: the background layer. Host → device carries the
+     * Mac's revision (apply only if newer); device → host is a request the
+     * Mac applies and echoes with a new revision.
+     */
+    data class Background(val background: app.inkbridge.core.canvas.CanvasBackground, val revision: Long) : Payload {
+        override val type get() = "canvas.background"
+    }
     data class Command(val command: CanvasCommand) : Payload {
         override val type get() = "canvas.command"
     }

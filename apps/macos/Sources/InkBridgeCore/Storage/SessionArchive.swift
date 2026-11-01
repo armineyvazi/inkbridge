@@ -27,11 +27,14 @@ public struct SessionMetadata: Codable, Equatable, Sendable {
     public var fit: CoordinateMapper.Fit
     public var calibration: CoordinateMapper.Calibration
     public var strokeCount: Int
+    /// The background layer. Optional so sessions saved before it existed still load (as overlay).
+    public var background: CanvasBackground?
 
     public init(
         id: String, title: String, startedAt: Date, savedAt: Date, deviceName: String?, displayName: String?,
-        mapper: CoordinateMapper, strokeCount: Int
+        mapper: CoordinateMapper, strokeCount: Int, background: CanvasBackground = .overlay
     ) {
+        self.background = background
         format = Self.currentFormat
         self.id = id
         self.title = title
@@ -134,6 +137,7 @@ public enum SessionArchive {
         try encoder.encode(metadata).write(to: dir.appendingPathComponent("session.json"), options: .atomic)
     }
 
+    /// `metadata.background` carries the background layer; nil means a pre-background session (overlay).
     public static func load(from dir: URL) throws -> (SessionMetadata, [Stroke]) {
         let meta = try decoder.decode(SessionMetadata.self, from: Data(contentsOf: dir.appendingPathComponent("session.json")))
         guard meta.format == SessionMetadata.currentFormat else { throw ArchiveError.unsupportedFormat(meta.format) }
@@ -188,21 +192,42 @@ public enum SessionArchive {
         files += ["annotations/annotations.png", "annotations/annotations.svg", "annotations/strokes.json"]
 
         let fullPageName = "full-page.\(options.fullPageFormat.fileExtension)"
-        if let background {
-            try fm.createDirectory(at: url("background"), withIntermediateDirectories: true)
-            try writeImage(background, to: url("background/screen.png"), type: .png)
-            let composite = try renderImage(strokes, mapper: mapper, background: background, transparent: false, scale: options.pixelScale)
+        let bg = metadata.background ?? .overlay
+        // The background layer is saved on its own: its definition always, its pixels when it has any.
+        try fm.createDirectory(at: url("background"), withIntermediateDirectories: true)
+        try encoder.encode(bg).write(to: url("background/background.json"))
+        files.append("background/background.json")
+        if bg.mode == .studio || bg.pattern != .none {
+            let layer = try renderImage([], mapper: mapper, background: nil, canvasBackground: bg, transparent: true, scale: options.pixelScale)
+            try writeImage(layer, to: url("background/canvas-background.png"), type: .png)
+            files.append("background/canvas-background.png")
+        }
+
+        // Studio covers the desktop, so the screen capture is not part of the page.
+        let screen = bg.mode == .studio ? nil : background
+        if bg.mode == .studio {
+            skipped["background/screen.png"] = "Studio Canvas hides the desktop"
+        }
+        if let screen {
+            try writeImage(screen, to: url("background/screen.png"), type: .png)
+            files.append("background/screen.png")
+        }
+        if screen != nil || bg.mode == .studio {
+            let composite = try renderImage(strokes, mapper: mapper, background: screen, canvasBackground: bg,
+                                            transparent: false, scale: options.pixelScale)
             try writeImage(composite, to: url(fullPageName), type: options.fullPageFormat.type, quality: options.jpegQuality)
             try writeImage(composite, to: url("preview.png"), type: .png)
-            files += ["background/screen.png", fullPageName, "preview.png"]
+            files += [fullPageName, "preview.png"]
         } else {
-            let onWhite = try renderImage(strokes, mapper: mapper, background: nil, transparent: false, scale: options.pixelScale)
+            let onWhite = try renderImage(strokes, mapper: mapper, background: nil, canvasBackground: bg, transparent: false, scale: options.pixelScale)
             try writeImage(onWhite, to: url("preview.png"), type: .png)
             files.append("preview.png")
             let reason = backgroundUnavailableReason ?? "no screenshot requested"
             skipped["background/screen.png"] = reason
             skipped[fullPageName] = reason
         }
+        try writePDF(strokes, mapper: mapper, screen: screen, canvasBackground: bg, to: url("full-page.pdf"))
+        files.append("full-page.pdf")
 
         try encoder.encode(metadata).write(to: url("session/metadata.json"))
         try encoder.encode(CoordinateMappingInfo(mapper: mapper, pixelScale: Double(options.pixelScale)))
@@ -254,7 +279,10 @@ public enum SessionArchive {
     // MARK: Rendering
 
     /// Renders strokes at `scale` pixels per point over a screenshot, white, or transparency.
+    /// Layers, bottom to top: screenshot (`background`), canvas background
+    /// (`canvasBackground`: studio fill and/or pattern), strokes.
     public static func renderImage(_ strokes: [Stroke], mapper: CoordinateMapper, background: CGImage?,
+                                   canvasBackground: CanvasBackground? = nil,
                                    transparent: Bool = false, scale: CGFloat = 2) throws -> CGImage {
         let w = Int(mapper.canvas.width * scale), h = Int(mapper.canvas.height * scale)
         guard w > 0, h > 0, let ctx = CGContext(
@@ -265,16 +293,36 @@ public enum SessionArchive {
         let bounds = CGRect(x: 0, y: 0, width: w, height: h)
         if let background {
             ctx.draw(background, in: bounds)
-        } else if !transparent {
+        } else if !transparent && canvasBackground?.mode != .studio {
             ctx.setFillColor(CGColor(srgbRed: 1, green: 1, blue: 1, alpha: 1))
             ctx.fill(bounds)
         }
         // Core Graphics bitmaps are bottom-left origin; the renderer expects top-left.
         ctx.translateBy(x: 0, y: CGFloat(h))
         ctx.scaleBy(x: scale, y: -scale)
+        if let canvasBackground {
+            BackgroundRenderer.draw(canvasBackground, in: ctx, mapper: mapper,
+                                    rect: CGRect(origin: .zero, size: mapper.canvas))
+        }
         StrokeRenderer.draw(strokes, in: ctx, mapper: mapper)
         guard let image = ctx.makeImage() else { throw ArchiveError.renderFailed }
         return image
+    }
+
+    /// The page as vector PDF: background fill and pattern as paths, strokes as
+    /// paths, the screenshot (overlay mode) as an image underneath.
+    static func writePDF(_ strokes: [Stroke], mapper: CoordinateMapper, screen: CGImage?,
+                         canvasBackground: CanvasBackground, to url: URL) throws {
+        var box = CGRect(origin: .zero, size: mapper.canvas)
+        guard let ctx = CGContext(url as CFURL, mediaBox: &box, nil) else { throw ArchiveError.writeFailed(url.lastPathComponent) }
+        ctx.beginPDFPage(nil)
+        if let screen { ctx.draw(screen, in: box) }
+        ctx.translateBy(x: 0, y: box.height)
+        ctx.scaleBy(x: 1, y: -1)
+        BackgroundRenderer.draw(canvasBackground, in: ctx, mapper: mapper, rect: box)
+        StrokeRenderer.draw(strokes, in: ctx, mapper: mapper)
+        ctx.endPDFPage()
+        ctx.closePDF()
     }
 
     static func writeImage(_ image: CGImage, to url: URL, type: UTType, quality: Double = 0.9) throws {

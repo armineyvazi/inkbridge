@@ -8,6 +8,10 @@ import InkBridgeCore
 //   inkbridge-probe [--seconds N] [--code XXXX-XXXX] [--no-wifi]
 //                   [--usb-port 8765] [--wifi-port 8766] [--expect-strokes N]
 //                   [--expect-pairings N] [--identity DIR]
+//                   [--push-background SPEC@SECONDS ...]   SPEC = overlay | white | black | #rrggbb[:pattern]
+//
+// Background requests from the device are applied and echoed exactly like the
+// app does (single writer, revisioned), and printed.
 //
 // Wi-Fi is TLS with a throwaway identity, and a Connect Device window with
 // --code stays open for the whole run, so a simulator can pair and then
@@ -27,6 +31,7 @@ struct Options {
     /// Keep the TLS identity here instead of a throwaway directory, so a
     /// tablet's certificate pin survives probe restarts.
     var identityDir: String?
+    var pushes: [(CanvasBackground, Double)] = []
 
     init(_ args: [String]) {
         var it = args.dropFirst().makeIterator()
@@ -40,6 +45,11 @@ struct Options {
             case "--expect-strokes": expectStrokes = Int(it.next() ?? "")
             case "--expect-pairings": expectPairings = Int(it.next() ?? "")
             case "--identity": identityDir = it.next()
+            case "--push-background":
+                let parts = (it.next() ?? "").split(separator: "@")
+                if parts.count == 2, let at = Double(parts[1]), let bg = Options.parseBackground(String(parts[0])) {
+                    pushes.append((bg, at))
+                }
             default:
                 FileHandle.standardError.write(Data("unknown argument \(a)\n".utf8))
                 exit(2)
@@ -48,7 +58,22 @@ struct Options {
     }
 }
 
+extension Options {
+    static func parseBackground(_ spec: String) -> CanvasBackground? {
+        let parts = spec.split(separator: ":").map(String.init)
+        let pattern = parts.count > 1 ? CanvasBackground.Pattern(rawValue: parts[1]) ?? .none : .none
+        switch parts[0] {
+        case "overlay": return CanvasBackground(mode: .overlay, pattern: pattern)
+        case "white": return .studio(CanvasBackground.white, pattern: pattern)
+        case "black": return .studio(CanvasBackground.black, pattern: pattern)
+        default: return RGBA(hex: parts[0] + "ff").map { .studio($0, pattern: pattern) }
+        }
+    }
+}
+
 final class Probe: InkServerDelegate {
+    var peerID: UUID?
+    var backgroundsReceived = 0
     let store = StrokeStore()
     lazy var ingestor = StrokeIngestor(store: store)
     var clock = ClockSync()
@@ -64,6 +89,8 @@ final class Probe: InkServerDelegate {
     var lastPointAt: Int64?
 
     func inkServer(_ s: InkServer, didConnect peer: PeerInfo) {
+        peerID = peer.id
+        s.send(.canvasBackground(store.background, revision: store.backgroundRevision), to: peer.id)
         let h = peer.hello
         print("connected: \(h.deviceName) [\(peer.kind.rawValue)] model=\(h.model) api=\(h.androidAPI) surface=\(h.surfaceWidthPx)x\(h.surfaceHeightPx) pressure=\(h.capabilities.pressure) eraser=\(h.capabilities.eraser)")
     }
@@ -83,6 +110,12 @@ final class Probe: InkServerDelegate {
                     transport.add(Double(receivedAtNs - sentHostNs) / 1e6)
                 }
             }
+        }
+        if case let .canvasBackground(bg, _) = m.payload {
+            backgroundsReceived += 1
+            store.setBackground(bg)
+            print("background from device: \(bg.mode.rawValue) \(bg.color.hex) \(bg.pattern.rawValue) → revision \(store.backgroundRevision)")
+            s.send(.canvasBackground(store.background, revision: store.backgroundRevision), to: peer.id)
         }
         let change = ingestor.handle(m, streamID: peer.hello.streamID)
         ingest.add(Double(monotonicNowNs() - receivedAtNs) / 1e6)
@@ -114,6 +147,7 @@ final class Probe: InkServerDelegate {
     func report() {
         func f(_ v: Double?) -> String { v.map { String(format: "%.2f", $0) } ?? "n/a" }
         print("---- probe report ----")
+        print("background: \(store.background.mode.rawValue) \(store.background.color.hex) \(store.background.pattern.rawValue) (revision \(store.backgroundRevision), \(backgroundsReceived) requests from device)")
         print("messages: \(messages), points: \(points), strokes: \(store.strokes.count), dropped duplicates: \(ingestor.droppedCount)")
         if let a = firstPointAt, let b = lastPointAt, b > a {
             print("point rate: \(String(format: "%.0f", Double(points) / (Double(b - a) / 1e9))) samples/s averaged from first to last point (includes pauses)")
@@ -150,6 +184,13 @@ let server = InkServer(config: config)
 server.delegate = probe
 server.start()
 server.openPairing(code: options.code)
+for (bg, at) in options.pushes {
+    DispatchQueue.main.asyncAfter(deadline: .now() + at) {
+        probe.store.setBackground(bg)
+        print("background pushed: \(bg.mode.rawValue) \(bg.color.hex) \(bg.pattern.rawValue) revision \(probe.store.backgroundRevision)")
+        if let id = probe.peerID { server.send(.canvasBackground(bg, revision: probe.store.backgroundRevision), to: id) }
+    }
+}
 print("probe running for \(Int(options.seconds))s; pairing code \(options.code); tls \(identity.shortFingerprint)")
 setvbuf(stdout, nil, _IOLBF, 0)
 

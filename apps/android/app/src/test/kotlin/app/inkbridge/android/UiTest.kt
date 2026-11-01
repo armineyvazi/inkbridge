@@ -17,6 +17,11 @@ import app.inkbridge.android.features.settings.AppSettings
 import app.inkbridge.android.features.settings.SettingsActivity
 import app.inkbridge.core.connection.ConnectionMode
 import app.inkbridge.core.input.PressureResponse
+import app.inkbridge.core.input.StylusEvent
+import app.inkbridge.core.protocol.Tool
+import app.inkbridge.core.protocol.InkPoint
+import app.inkbridge.core.protocol.WireStyle
+import app.inkbridge.core.canvas.CanvasBackground
 import org.junit.Before
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -212,6 +217,30 @@ class UiTest {
         listOf("Undo", "Redo", "Zoom in", "Zoom out", "Fit all ink", "More", "Connection status").forEach { root.byLabel(it) }
         root.byLabel("Zoom in").performClick()
         assertTrue("150%" in root.texts())
+    }
+
+    @Test
+    fun backgroundPanelSwitchesInstantlyAndKeepsStrokesAndView() {
+        val a = Robolectric.buildActivity(CanvasActivity::class.java).setup().get()
+        idle()
+        val doc = app.connection.document
+        doc.applyLocal(StylusEvent.Begin("s-ui", Tool.PEN,
+            InkPoint(5.0, 5.0, 1.0, 0)), WireStyle(0, 2.0))
+        val root = a.window.decorView
+        root.byLabel("Zoom in").performClick()
+        root.byLabel("Background").performClick()
+        assertTrue("Background" in root.texts() && "Studio canvas" in root.texts())
+        root.byLabel("Black background").performClick()
+        assertEquals(CanvasBackground.studio(CanvasBackground.BLACK), doc.background)
+        root.byLabel("White background").performClick()
+        root.byLabel("Graph").performClick()
+        assertEquals(CanvasBackground.Pattern.GRAPH, doc.background.pattern)
+        root.byLabel("Desktop overlay").performClick()
+        assertEquals(CanvasBackground.Mode.OVERLAY, doc.background.mode)
+        assertEquals(1, doc.size, "switching backgrounds never touches strokes")
+        assertTrue("150%" in root.texts(), "zoom is preserved")
+        root.byLabel("Close").performClick()
+        assertTrue("Studio canvas" !in root.texts())
     }
 
     @Test

@@ -97,10 +97,8 @@ class SettingsActivity : InkActivity() {
 
     private fun display(c: SpacedColumn) {
         c.add(Ink.section(this, "Display"), 0)
-        c.add(Ink.setting(this, "Canvas background", "Shown only on the tablet; never sent to the Mac.",
-            Ink.segmented(this, CanvasBackground.entries.map { it.label }, CanvasBackground.entries.indexOf(s.background)) {
-                s = s.copy(background = CanvasBackground.entries[it])
-            }, below = true), 0)
+        c.add(Ink.setting(this, "Canvas background", "Choose it on the canvas with the background button. It is shared with the Mac: Desktop Overlay or a Studio Canvas colour, with optional paper.",
+            android.widget.Space(this)), 0)
         c.add(toggle("Clean refresh after Clear and Fit", "A brief black flash that removes e-ink ghosting.", s.cleanRefresh) {
             s = s.copy(cleanRefresh = it)
         }, 0)

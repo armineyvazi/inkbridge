@@ -12,6 +12,8 @@ protocol ToolbarActions: AnyObject {
     func fitAll()
     func homeView()
     func hideToolbar()
+    /// Changes the canvas background layer (one undo step, synced to the tablet).
+    func setBackground(_ background: CanvasBackground)
 }
 
 /// The floating tool palette.
@@ -50,6 +52,8 @@ struct ToolbarView: View {
 
     @ViewBuilder private var expanded: some View {
         if !vertical { StatusBadge(model: model); separator }
+        BackgroundButton(model: model, actions: actions)
+        separator
         toolButtons
         separator
         colorSwatches
@@ -67,6 +71,7 @@ struct ToolbarView: View {
 
     @ViewBuilder private var compact: some View {
         statusDot
+        BackgroundButton(model: model, actions: actions)
         toolButtons
         colorMenu
         iconButton("arrow.uturn.backward", "Undo (⌃⌥Z)", enabled: model.canUndo) { actions?.undo() }
@@ -87,6 +92,7 @@ struct ToolbarView: View {
         .menuIndicator(.hidden)
         .fixedSize()
         .help("Tool")
+        BackgroundButton(model: model, actions: actions)
         iconButton("arrow.uturn.backward", "Undo (⌃⌥Z)", enabled: model.canUndo) { actions?.undo() }
     }
 

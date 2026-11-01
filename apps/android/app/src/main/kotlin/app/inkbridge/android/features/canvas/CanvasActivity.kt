@@ -69,7 +69,6 @@ class CanvasActivity : InkActivity() {
             onViewport = { v, final -> applyViewport(v, final, fromHost = false) }
         }
         renderer.inkVisible = s.showLocalInk
-        renderer.background = s.background
         source.onEvents = { events ->
             val c = manager.client
             for (e in events) {
@@ -85,8 +84,9 @@ class CanvasActivity : InkActivity() {
             setBackgroundColor(Ink.PAPER)
             addView(canvas, FrameLayout.LayoutParams(-1, -1))
             chipView = chip()
-            addView(chipView, FrameLayout.LayoutParams(-2, -2, Gravity.TOP or Gravity.START).apply {
-                topMargin = Ink.dp(context, 12); marginStart = Ink.dp(context, 12)
+            // Bottom left: status stays readable without sharing the top edge with the tools.
+            addView(chipView, FrameLayout.LayoutParams(-2, -2, Gravity.BOTTOM or Gravity.START).apply {
+                bottomMargin = Ink.dp(context, 12); marginStart = Ink.dp(context, 12)
             })
             bar = buildBar()
             addView(bar, FrameLayout.LayoutParams(-2, -2, Gravity.TOP or Gravity.END).apply {
@@ -153,6 +153,7 @@ class CanvasActivity : InkActivity() {
         addView(Ink.iconButton(ctx, R.drawable.ic_zoom_in, "Zoom in", BAR) { zoomBy(1.5) })
         addView(Ink.iconButton(ctx, R.drawable.ic_fit, "Fit all ink", BAR) { fitAll() })
         addView(divider())
+        addView(Ink.iconButton(ctx, R.drawable.ic_background, "Background", BAR) { toggleBackgroundSheet() })
         lateinit var more: View
         more = Ink.iconButton(ctx, R.drawable.ic_more, "More", BAR) { showMore(more) }
         addView(more)
@@ -188,9 +189,38 @@ class CanvasActivity : InkActivity() {
         }
     }
 
+    // MARK: Background
+
+    private var sheet: View? = null
+
+    private fun toggleBackgroundSheet() {
+        val root = canvas.parent as FrameLayout
+        sheet?.let { root.removeView(it); sheet = null; return }
+        val panel = BackgroundSheet(this, manager.document.background, onPick = ::setBackground, onClose = ::toggleBackgroundSheet)
+        root.addView(panel, FrameLayout.LayoutParams(Ink.dp(this, 380), -2, Gravity.TOP or Gravity.END).apply {
+            topMargin = Ink.dp(this@CanvasActivity, 12 + BAR + 12); marginEnd = Ink.dp(this@CanvasActivity, 12)
+        })
+        sheet = panel
+    }
+
+    /**
+     * Shown immediately, then sent to the Mac, which applies it as one undo
+     * step and answers with a new revision. Offline, the request waits in the
+     * outbox and is applied when the link returns.
+     */
+    private fun setBackground(bg: app.inkbridge.core.canvas.CanvasBackground) {
+        val doc = manager.document
+        val wasDark = doc.background.isDark
+        doc.setBackgroundLocal(bg)
+        manager.client.submitBackground(bg, doc.backgroundRevision)
+        // Black ⇄ white flips every pixel: one clean refresh avoids a ghost of the old paper.
+        if (wasDark != bg.isDark) cleanRefresh()
+    }
+
     private fun setControls(visible: Boolean) {
         bar.visibility = if (visible) View.VISIBLE else View.GONE
         chipView.visibility = bar.visibility
+        if (!visible) sheet?.let { (canvas.parent as FrameLayout).removeView(it); sheet = null }
         collapsed.visibility = if (visible) View.GONE else View.VISIBLE
     }
 

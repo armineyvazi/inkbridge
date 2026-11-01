@@ -126,6 +126,7 @@ final class InkCoordinator: NSObject {
         overlayView = OverlayView(store: store, mapper: mapper(for: screen))
         overlayView.onDraw = { [weak self] ns in self?.didDraw(at: ns) }
         overlayWindow = OverlayWindow(screen: screen, content: overlayView)
+        overlayWindow?.setStudio(store.background.mode == .studio)
         overlayWindow?.orderFrontRegardless()
         updateEraserRadius()
     }
@@ -178,6 +179,35 @@ final class InkCoordinator: NSObject {
     func syncDocument() {
         guard let peer = activePeer else { return }
         send(sync.diff(store.strokes), to: peer)
+        syncBackground()
+    }
+
+    /// Revision of the background the active tablet last received.
+    private var sentBackgroundRevision: UInt64?
+
+    /// Sends the background layer if the tablet has an older revision.
+    func syncBackground(force: Bool = false) {
+        guard let peer = activePeer, force || sentBackgroundRevision != store.backgroundRevision else { return }
+        sentBackgroundRevision = store.backgroundRevision
+        server.send(.canvasBackground(store.background, revision: store.backgroundRevision), to: peer.id)
+    }
+
+    /// Mirrors the store's background into the views and window. Cheap: no stroke re-render.
+    func backgroundDidChange() {
+        let bg = store.background
+        guard model.background != bg else { return }
+        model.background = bg
+        if bg.mode == .studio { model.lastStudioColor = bg.color }
+        overlayWindow?.setStudio(bg.mode == .studio)
+        overlayView?.needsDisplay = true
+    }
+
+    /// The single entry point for background changes (toolbar, hotkeys, tablet).
+    func setBackground(_ bg: CanvasBackground) {
+        guard store.setBackground(bg) else { return }
+        backgroundDidChange()
+        refreshEditState()
+        syncBackground()
     }
 
     /// Moves the shared view (Mac-side Fit all / Home) and tells the tablet.
@@ -266,6 +296,15 @@ extension InkCoordinator: InkServerDelegate {
         case let .strokeEnd(id):
             // The tablet already has its own stroke; diff only reports it if the Mac dropped it.
             sync.markKnown(id)
+        case let .canvasBackground(bg, _):
+            // A request from the tablet. The Mac is the single writer: apply it (one undo
+            // step), then echo the result with the new revision so both sides converge,
+            // even when nothing changed or a newer Mac-side change won the race.
+            if store.setBackground(bg) {
+                backgroundDidChange()
+                refreshEditState()
+            }
+            syncBackground(force: true)
         default:
             break
         }
@@ -335,6 +374,8 @@ extension InkCoordinator: InkServerDelegate {
         if let peer {
             ingestor.setSurface(CGSize(width: peer.hello.surfaceWidthPx, height: peer.hello.surfaceHeightPx))
             send(sync.resync(store.strokes), to: peer)
+            sentBackgroundRevision = nil
+            syncBackground()
         }
         relayoutOverlay()
     }

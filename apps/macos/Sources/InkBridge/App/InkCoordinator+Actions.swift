@@ -15,8 +15,23 @@ extension InkCoordinator: ToolbarActions {
     private func edit(_ change: (StrokeStore) -> Void) {
         change(store)
         overlayView.needsDisplay = true
+        backgroundDidChange()  // undo/redo may have changed the background layer
         refreshEditState()
         syncDocument()
+    }
+
+    /// ⌃⌥B: Desktop Overlay ⇄ Studio Canvas (last studio colour, same paper).
+    func toggleStudio() {
+        var bg = store.background
+        bg.mode = bg.mode == .studio ? .overlay : .studio
+        if bg.mode == .studio { bg.color = model.lastStudioColor }
+        setBackground(bg)
+    }
+
+    /// ⌃⌥⇧B: Studio Canvas black ⇄ white.
+    func swapStudioBlackWhite() {
+        let toBlack = !(store.background.mode == .studio && store.background.color == CanvasBackground.black)
+        setBackground(.studio(toBlack ? CanvasBackground.black : CanvasBackground.white, pattern: store.background.pattern))
     }
 
     func showToolbar() { toolbar.setVisible(true) }
@@ -90,6 +105,8 @@ extension InkCoordinator: ToolbarActions {
         keys.register(kVK_ANSI_F) { [weak self] in self?.fitAll() }
         keys.register(kVK_ANSI_0) { [weak self] in self?.homeView() }
         keys.register(kVK_ANSI_K) { [weak self] in self?.openConnectDevice() }
+        keys.register(kVK_ANSI_B) { [weak self] in self?.toggleStudio() }
+        keys.register(kVK_ANSI_B, modifiers: HotKeyCenter.controlOptionShift) { [weak self] in self?.swapStudioBlackWhite() }
     }
 
     // MARK: Persistence
@@ -110,15 +127,15 @@ extension InkCoordinator: ToolbarActions {
         return SessionMetadata(
             id: sessionID, title: sessionID, startedAt: sessionStarted, savedAt: Date(),
             deviceName: model.connection.deviceName, displayName: screen?.localizedName,
-            mapper: overlayView.mapper, strokeCount: store.strokes.count
+            mapper: overlayView.mapper, strokeCount: store.strokes.count, background: store.background
         )
     }
 
     /// Writes vector strokes only (no renders) so it is cheap to run often.
     /// Combined with the clean-exit flag this gives crash recovery.
     func autosave() {
-        guard store.revision != autosavedRevision else { return }
-        autosavedRevision = store.revision
+        guard store.documentVersion != autosavedRevision else { return }
+        autosavedRevision = store.documentVersion
         let dir = Self.sessionsDirectory.appendingPathComponent(sessionID)
         do {
             try SessionArchive.writeStrokes(store.strokes, metadata: makeMetadata(), to: dir)
@@ -132,10 +149,11 @@ extension InkCoordinator: ToolbarActions {
     func restore(sessionID: String) -> Bool {
         let dir = Self.sessionsDirectory.appendingPathComponent(sessionID)
         guard let (meta, strokes) = try? SessionArchive.load(from: dir), !strokes.isEmpty else { return false }
-        store.load(strokes)
+        store.load(strokes, background: meta.background)
+        backgroundDidChange()
         ingestor.viewport = meta.viewport
         relayoutOverlay()
-        autosavedRevision = store.revision
+        autosavedRevision = store.documentVersion
         overlayView?.needsDisplay = true
         return true
     }

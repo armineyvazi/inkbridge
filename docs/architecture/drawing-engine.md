@@ -110,3 +110,10 @@ Live drawing renders only the active stroke within a small dirty rect, plus a bl
 the cached bitmap. The 7 ms full render is paid only when the cache is rebuilt
 (stroke end, undo, erase). Metal is **not** justified by these numbers. Revisit it
 only if profiling shows cache rebuilds stalling with very large sessions.
+
+## Background layer (Phase 1)
+
+The background is a separate layer drawn before strokes and never cached with them.
+`BackgroundRenderer` (Swift) and `CanvasRenderer.drawBackground` (tablet) share the
+pattern spacings. See [background-rendering.md](background-rendering.md) and
+[shared-drawing-model.md](shared-drawing-model.md).

@@ -24,6 +24,13 @@ final class OverlayWindow: NSWindow {
         move(to: screen)
     }
 
+    /// Studio Canvas is opaque and catches clicks, so they never land on apps
+    /// hidden underneath. Desktop Overlay is transparent and click-through.
+    func setStudio(_ studio: Bool) {
+        ignoresMouseEvents = !studio
+        isOpaque = studio
+    }
+
     func move(to screen: NSScreen) {
         setFrame(screen.frame, display: true)
     }
