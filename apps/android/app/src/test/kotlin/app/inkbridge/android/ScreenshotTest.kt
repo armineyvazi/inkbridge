@@ -9,6 +9,9 @@ import app.inkbridge.android.features.connect.ConnectActivity
 import app.inkbridge.android.features.dashboard.DashboardActivity
 import app.inkbridge.android.features.diagnostics.DiagnosticsActivity
 import app.inkbridge.android.features.settings.SettingsActivity
+import app.inkbridge.android.features.canvas.JournalSheet
+import app.inkbridge.core.protocol.JournalItem
+import app.inkbridge.core.protocol.Payload
 import org.junit.Assume.assumeTrue
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -62,7 +65,22 @@ class ScreenshotTest {
         shoot("3-manual", connect.window.decorView)
         shoot("4-settings", Robolectric.buildActivity(SettingsActivity::class.java).setup().get().window.decorView)
         shoot("5-diagnostics", Robolectric.buildActivity(DiagnosticsActivity::class.java).setup().get().window.decorView)
-        shoot("6-canvas", Robolectric.buildActivity(CanvasActivity::class.java).setup().get().window.decorView)
+        val canvas = Robolectric.buildActivity(CanvasActivity::class.java).setup().get()
+        shoot("6-canvas", canvas.window.decorView)
+        // The journal sheet as it looks on the tablet (open day, put away on the Mac), over a white frame.
+        val sheet = JournalSheet(canvas, { _, _ -> true }, {})
+        val t = { h: Int, m: Int -> java.util.Calendar.getInstance().apply { set(2026, 10, 1, h, m, 0) }.timeInMillis }
+        sheet.render(Payload.Journal(true, "2026-11-01", true, "Planning the sync engine", listOf(
+            JournalItem("1", "ink", "", false, t(9, 15)),
+            JournalItem("2", "note", "Offline-first: the tablet never waits for the Mac", false, t(9, 24)),
+            JournalItem("3", "task", "Measure input to ink on the BOOX", false, t(10, 2)),
+            JournalItem("4", "task", "Book the design review", true, t(10, 5)),
+            JournalItem("5", "ink", "", false, t(14, 31)),
+        ), 3, hidden = true), connected = true)
+        shoot("7-journal", android.widget.FrameLayout(canvas).apply {
+            setPadding(160, 160, 160, 160)
+            addView(sheet, android.widget.FrameLayout.LayoutParams(-1, -2))
+        })
     }
 }
 

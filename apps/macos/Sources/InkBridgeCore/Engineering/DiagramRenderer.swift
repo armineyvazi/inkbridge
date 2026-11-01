@@ -21,11 +21,26 @@ public enum DiagramRenderer {
     }
 
     /// `icon` returns a template image for an SF Symbol name (the app supplies it; nil = no icon).
+    /// `dirty` (view points): only objects intersecting it are drawn. While writing,
+    /// each frame repaints a few points of ink; drawing every node and label there
+    /// was measurable per-frame work on large diagrams.
     public static func draw(_ d: Diagram, in ctx: CGContext, mapper: CoordinateMapper, theme: Theme,
-                            selection: Set<String> = [], icon: ((String) -> CGImage?)? = nil) {
+                            selection: Set<String> = [], icon: ((String) -> CGImage?)? = nil, dirty: CGRect? = nil) {
         let s = CGFloat(mapper.scale)
-        for e in d.edges { drawEdge(e, d, ctx, mapper, theme, s, selected: selection.contains(e.id)) }
-        for n in d.nodes { drawNode(n, ctx, mapper, theme, s, selected: selection.contains(n.id), icon: icon) }
+        for e in d.edges {
+            if let dirty {
+                let pts = d.path(of: e).map { mapper.map(x: Double($0.x), y: Double($0.y)) }
+                guard let minX = pts.map(\.x).min(), let maxX = pts.map(\.x).max(),
+                      let minY = pts.map(\.y).min(), let maxY = pts.map(\.y).max(),
+                      CGRect(x: minX, y: minY - 24, width: maxX - minX, height: maxY - minY + 24).insetBy(dx: -12, dy: -12).intersects(dirty)
+                else { continue }
+            }
+            drawEdge(e, d, ctx, mapper, theme, s, selected: selection.contains(e.id))
+        }
+        for n in d.nodes {
+            if let dirty, !rect(n.frame, mapper).insetBy(dx: -8, dy: -8).intersects(dirty) { continue }
+            drawNode(n, ctx, mapper, theme, s, selected: selection.contains(n.id), icon: icon)
+        }
     }
 
     static func rect(_ r: CGRect, _ m: CoordinateMapper) -> CGRect {

@@ -64,6 +64,8 @@ class DiagnosticsActivity : InkActivity() {
             line("stream", m.client.streamId.take(8))
             line("dropped", m.client.droppedEvents.get().toString())
             line("re-sent", m.client.replayedMessages.get().toString())
+            line("ink latency", app.inkbridge.android.features.canvas.CanvasRenderer.inkLatency.summary())
+            line("frame time", app.inkbridge.android.features.canvas.CanvasRenderer.frameTime.summary())
             line("protocol", "v$PROTOCOL_VERSION")
             append('\n')
             line("wifi", m.network.state.value.let { if (it.connected) "connected · ${it.address ?: "?"}" else if (m.network.wifiEnabled) "not connected" else "off" })

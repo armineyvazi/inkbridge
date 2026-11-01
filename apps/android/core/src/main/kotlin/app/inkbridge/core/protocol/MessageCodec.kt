@@ -112,7 +112,7 @@ object MessageCodec {
         )
         is Payload.Journal -> mapOf(
             "active" to JsonPrimitive(p.active), "day" to JsonPrimitive(p.day), "today" to JsonPrimitive(p.today),
-            "title" to JsonPrimitive(p.title), "revision" to JsonPrimitive(p.revision),
+            "title" to JsonPrimitive(p.title), "revision" to JsonPrimitive(p.revision), "hidden" to JsonPrimitive(p.hidden),
             "entries" to buildJsonArray {
                 p.entries.forEach { e ->
                     add(buildJsonObject {
@@ -236,10 +236,11 @@ object MessageCodec {
                 JournalItem(o.string("id"), kind, o.label("text"), o.bool("done"), o.long("created_ms"))
             },
             f.nonNegativeLong("revision"),
+            f.optionalBool("hidden") ?: false,
         )
         "journal.request" -> Payload.JournalRequest(
             f.string("action").also {
-                if (it !in setOf("open", "close", "today", "prev", "next", "day", "add_note", "add_task")) throw ProtocolException("invalid field action")
+                if (it !in JOURNAL_ACTIONS) throw ProtocolException("invalid field action")
             },
             f.optionalString("name"),
         )
@@ -346,6 +347,9 @@ object MessageCodec {
 }
 
 /** Validating accessors over a JSON object. */
+/** Every `journal.request` action the Mac understands. */
+val JOURNAL_ACTIONS = setOf("open", "close", "today", "prev", "next", "day", "add_note", "add_task", "hide", "show")
+
 private class Fields(val obj: JsonObject) {
     private fun prim(key: String): JsonPrimitive {
         val v = obj[key]
@@ -374,6 +378,9 @@ private class Fields(val obj: JsonObject) {
 
     fun optionalHex(key: String): String? =
         if (obj[key] == null || obj[key] is JsonNull) null else hex(key)
+
+    fun optionalBool(key: String): Boolean? =
+        if (obj[key] == null || obj[key] is JsonNull) null else bool(key)
 
     fun bool(key: String): Boolean {
         val p = prim(key)

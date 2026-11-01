@@ -53,7 +53,9 @@ simulated pen.
 | Overlay | transparent, click-through, above full-screen apps, any display |
 | Toolbar | expanded / compact / minimal; bottom, top, left, right or anywhere; hide, then reopen from the menu-bar icon |
 | Shortcuts | ⌃⌥ P/H/E/L tools · Z undo · ⇧Z redo · C clear · F fit · 0 home · O hide · S save · T toolbar |
-| Sessions | autosave every 5 s, crash recovery; **Save…** to any folder: full page (PNG/JPEG), transparent ink layer (PNG + SVG), editable strokes, background, mapping metadata |
+| Daily Journal | ⌃⌥N or 📖: today's page in one action, timestamped handwriting/notes/tasks, History with calendar and search, **hide without leaving** (📖 again brings it back as it was), Done returns to your work exactly (undo history included). Own folder, local-midnight day changes |
+| Studio & Engineering | backgrounds (overlay or studio colour, grid/dots/graph/engineering paper); Engineering workspace (⌃⌥G): components, smart connectors, templates |
+| Sessions | projects & storage window (⌃⌥J); incremental autosave (appends new strokes, compacts later), crash recovery; **Save…** to any folder: full page (PNG/JPEG), transparent ink layer (PNG + SVG), editable strokes, background, mapping metadata |
 | Connection | Wi-Fi first: Bonjour discovery, TLS with a pinned certificate, one-time pairing code (or QR link), device tokens; reconnect 163 ms after Wi-Fi returns; strokes lost on a dead link are re-sent. Optional USB (adb reverse) |
 | Tablet app | E-ink-first UI: dashboard, Connect to Mac, full-screen canvas with a slim floating bar, Settings, Diagnostics |
 | Diagnostics | live RTT and pen-to-Mac latency; exportable report; on-tablet stylus readout |
@@ -72,17 +74,20 @@ docs/             research, architecture, protocol, ADRs, diagrams
 ## Tests
 
 ```bash
-make -C apps/macos test     # 87 Swift tests (unit, socket and TLS integration)
-make -C apps/android test   # 56 Kotlin core + 9 Robolectric UI tests
+make -C apps/macos test     # 140 Swift tests (unit, socket and TLS integration, journal, performance)
+make -C apps/macos bench    # drawing and saving benchmarks (release), p50/p95
+make -C apps/android test   # 70 Kotlin core + 20 Robolectric UI tests
 scripts/e2e.sh && scripts/e2e.sh wifi
 ```
 
 ## Known limitations
 
 - USB needs developer mode for now (AOA transport planned; see ADR-002).
-- Wi-Fi is authenticated but **not encrypted** yet. Use it on trusted networks (see
+- Pairing uses a one-time code over TLS with a pinned certificate. There's no PAKE yet (see
   [security](docs/architecture/security.md)).
-- There is no calibration wizard, session history browser or onboarding flow yet.
+- There is no calibration wizard yet.
+- On the BOOX, ink latency is bound by the 40 Hz e-ink panel (sample → frame posted ≈ 30 ms p50).
+  BOOX's firmware raw-handwriting mode is not used yet ([writing latency](docs/performance/writing-latency.md)).
 - The tablet doesn't show the Mac's screen. That's by design.
 - Wi-Fi from the real tablet, eraser-end pens and the Note Air 3 itself are not yet tested.
 - The tablet shows ink in monochrome (e-ink); colours appear on the Mac.

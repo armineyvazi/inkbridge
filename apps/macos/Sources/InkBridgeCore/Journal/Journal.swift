@@ -1,3 +1,4 @@
+import CoreGraphics
 import Foundation
 
 /// Calendar-day logic for the Daily Journal. Days follow real local calendar
@@ -121,6 +122,21 @@ public struct JournalPage: Codable, Equatable, Sendable {
         }
     }
 
+    /// Where each handwriting session's time label goes (top-left of its ink, canvas px).
+    /// Computed once per document change, not per frame.
+    public func inkAnchors(_ strokes: [Stroke]) -> [(date: Date, point: CGPoint)] {
+        let byID = Dictionary(strokes.map { ($0.id, $0) }, uniquingKeysWith: { a, _ in a })
+        return entries.compactMap { e -> (Date, CGPoint)? in
+            guard e.kind == .ink else { return nil }
+            var minX = Double.infinity, minY = Double.infinity
+            for id in e.strokeIDs {
+                guard let b = byID[id]?.bounds else { continue }
+                minX = min(minX, b.minX); minY = min(minY, b.minY)
+            }
+            return minX.isFinite ? (e.createdAt, CGPoint(x: minX, y: minY)) : nil
+        }
+    }
+
     /// Timestamps are kept to the millisecond, the precision they are stored with.
     static func ms(_ d: Date) -> Date { Date(timeIntervalSince1970: (d.timeIntervalSince1970 * 1000).rounded() / 1000) }
 }
@@ -147,11 +163,16 @@ public final class JournalStore {
 
     /// UTC ISO-8601 with milliseconds ("2026-11-01T05:45:00.123Z"): unambiguous and
     /// exact enough that a reloaded timestamp equals the one recorded.
-    static func isoFormatter() -> ISO8601DateFormatter {
+    /// One shared formatter (ISO8601DateFormatter is thread-safe). Creating one
+    /// per timestamp made a 300-entry page save take ~80 ms.
+    nonisolated(unsafe) static let iso: ISO8601DateFormatter = {
         let f = ISO8601DateFormatter()
         f.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
         return f
-    }
+    }()
+    nonisolated(unsafe) static let isoPlain = ISO8601DateFormatter()
+
+    static func isoFormatter() -> ISO8601DateFormatter { iso }
 
     static let encoder: JSONEncoder = {
         let e = JSONEncoder()
@@ -169,7 +190,7 @@ public final class JournalStore {
         let d = JSONDecoder()
         d.dateDecodingStrategy = .custom { dec in
             let s = try dec.singleValueContainer().decode(String.self)
-            if let date = isoFormatter().date(from: s) ?? ISO8601DateFormatter().date(from: s) { return date }
+            if let date = iso.date(from: s) ?? isoPlain.date(from: s) { return date }
             throw DecodingError.dataCorrupted(.init(codingPath: dec.codingPath, debugDescription: "bad date \(s)"))
         }
         return d

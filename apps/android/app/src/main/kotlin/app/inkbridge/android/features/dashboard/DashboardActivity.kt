@@ -45,6 +45,9 @@ class DashboardActivity : InkActivity() {
     private lateinit var saveProject: View
     private lateinit var saveWhere: View
     private lateinit var saveStatus: View
+    private lateinit var journalCard: View
+    private lateinit var journalDay: View
+    private lateinit var journalWhere: View
     private var lastTone: Tone? = null
     private var lastPrimary: Triple<PrimaryAction, Boolean, Boolean>? = null
 
@@ -67,6 +70,16 @@ class DashboardActivity : InkActivity() {
                 st.status == "unsaved" -> "Changes not saved yet"
                 else -> "Save failed — open Projects & storage"
             })
+        }
+        // The journal stays open when you leave the canvas; this card brings you back to it.
+        observe(combine(manager.journal, manager.client.state) { j, s -> j to s }) { (j, s) ->
+            val open = j != null && j.active && s is ClientState.Ready
+            journalCard.visibility = if (open) View.VISIBLE else View.GONE
+            if (open) {
+                val (weekday, date) = app.inkbridge.android.features.canvas.JournalSheet.formatDay(j!!.day)
+                Ink.setValue(journalDay, "$weekday, $date" + if (j.today) " · Today" else "")
+                Ink.setValue(journalWhere, if (j.hidden) "Put away on your Mac (still saving)" else "Open on your Mac")
+            }
         }
         observe(combine(manager.paired, manager.client.state) { p, s -> p to s }) { (p, s) ->
             Ink.setValue(macRow, p?.name ?: if (manager.settings.mode == ConnectionMode.USB) "Over USB" else "Not paired")
@@ -119,6 +132,26 @@ class DashboardActivity : InkActivity() {
         secondary = Ink.row(this)
         card.add(secondary, Ink.dp(this, Ink.S))
         c.add(card, Ink.dp(this, Ink.L))
+
+        // Daily Journal (only while it is open on the Mac)
+        val journal = Ink.card(this)
+        journal.add(Ink.row(this).apply {
+            addView(Ink.icon(this@DashboardActivity, R.drawable.ic_book, Ink.INK, 22), LinearLayout.LayoutParams(Ink.dp(context, 22), Ink.dp(context, 22)).apply { marginEnd = Ink.dp(context, 10) })
+            addView(Ink.heading(this@DashboardActivity, "Daily Journal is open"))
+        })
+        journalDay = Ink.infoRow(this, "Day", "")
+        journalWhere = Ink.infoRow(this, "On your Mac", "")
+        journal.add(journalDay, Ink.dp(this, Ink.S)).add(journalWhere, 0)
+        journal.add(Ink.row(this).apply {
+            addView(Ink.button(this@DashboardActivity, "Continue writing", Ink.ButtonStyle.PRIMARY, R.drawable.ic_pen) { open<CanvasActivity>() },
+                LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1.3f))
+            addView(View(context), LinearLayout.LayoutParams(Ink.dp(context, Ink.S), 1))
+            addView(Ink.button(this@DashboardActivity, "Done", Ink.ButtonStyle.SECONDARY) { manager.requestJournal("close") },
+                LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
+        }, Ink.dp(this, Ink.M))
+        journalCard = journal
+        journal.visibility = View.GONE
+        c.add(journal, Ink.dp(this, Ink.M))
 
         // Drawing card
         val drawing = Ink.card(this)

@@ -177,8 +177,10 @@ public enum Payload: Equatable, Sendable {
     /// (so the tablet draws exactly what the Mac draws). Whole snapshot: diagrams are small.
     case diagramState(Diagram, revision: UInt64)
     /// Host → device: the Daily Journal (open or not, which day, its timestamped entries).
-    case journalState(active: Bool, day: String, today: Bool, title: String, entries: [JournalEntry], revision: UInt64)
-    /// Device → host: "open" | "close" | "today" | "prev" | "next" | "day" (name = yyyy-MM-dd) | "add_note" | "add_task".
+    /// `hidden`: the journal is open but put away on the Mac (optional on the wire, default false).
+    case journalState(active: Bool, day: String, today: Bool, title: String, entries: [JournalEntry], revision: UInt64, hidden: Bool = false)
+    /// Device → host: "open" | "close" | "today" | "prev" | "next" | "day" (name = yyyy-MM-dd) | "add_note" | "add_task"
+    /// | "hide" | "show" (put the open journal away on the Mac / bring it back, without leaving it).
     case journalRequest(action: String, name: String?)
     /// Host → device: project, session, save status (sent on change and on connect).
     case storageState(StorageState)

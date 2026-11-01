@@ -4,7 +4,7 @@ import XCTest
 final class MessageCodecTests: XCTestCase {
     func testEveryValidFixtureDecodesAndRoundTrips() throws {
         let files = try Fixtures.files("valid")
-        XCTAssertEqual(files.count, 29)
+        XCTAssertEqual(files.count, 30)
         for url in files {
             let data = try Data(contentsOf: url)
             let message = try MessageCodec.decode(data)
@@ -193,5 +193,17 @@ final class PairingLinkTests: XCTestCase {
         XCTAssertEqual(link.fingerprint.count, 32)
         XCTAssertEqual(PairingLink(url: link.url), link)
         XCTAssertNil(PairingLink(url: URL(string: text.replacingOccurrences(of: "v=3", with: "v=2"))!))
+    }
+}
+
+final class JournalProtocolTests: XCTestCase {
+    func testHiddenIsOptionalAndHideIsAnAction() throws {
+        // Older Macs omit "hidden": it defaults to false.
+        let old = #"{"version":3,"type":"journal.state","sequence":1,"timestamp_ns":1,"active":true,"day":"2026-11-01","today":true,"title":"","revision":1,"entries":[]}"#
+        guard case let .journalState(_, _, _, _, _, _, hidden) = try MessageCodec.decode(Data(old.utf8)).payload else { return XCTFail() }
+        XCTAssertFalse(hidden)
+        let hide = try MessageCodec.decode(try Fixtures.data("valid/journal.request.hide.json")).payload
+        XCTAssertEqual(hide, .journalRequest(action: "hide", name: nil))
+        XCTAssertTrue(MessageCodec.journalActions.isSuperset(of: ["hide", "show"]))
     }
 }

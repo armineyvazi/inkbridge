@@ -41,6 +41,8 @@ public enum ProtocolError: Error, Equatable, CustomStringConvertible {
 /// cannot hand the drawing engine NaN coordinates or unbounded strings.
 public enum MessageCodec {
     public static let maxStringLength = 128
+    /// Every `journal.request` action the Mac understands.
+    public static let journalActions: Set<String> = ["open", "close", "today", "prev", "next", "day", "add_note", "add_task", "hide", "show"]
     public static let maxPointsPerMessage = 256
     public static let maxIDsPerMessage = 256
     /// Canvas coordinates are unbounded in principle; this cap keeps a hostile
@@ -112,8 +114,8 @@ public enum MessageCodec {
                      "points": d.path(of: e).flatMap { [r($0.x), r($0.y)] }] as [String: Any]
                 },
             ]
-        case let .journalState(active, day, today, title, entries, revision):
-            return ["active": active, "day": day, "today": today, "title": title, "revision": revision,
+        case let .journalState(active, day, today, title, entries, revision, hidden):
+            return ["active": active, "day": day, "today": today, "title": title, "revision": revision, "hidden": hidden,
                     "entries": entries.suffix(100).map { e in
                         ["id": e.id, "kind": e.kind.rawValue, "text": String(e.text.prefix(120)), "done": e.done,
                          "created_ms": Int64(e.createdAt.timeIntervalSince1970 * 1000)] as [String: Any]
@@ -240,10 +242,11 @@ public enum MessageCodec {
                                             done: try e.bool("done"), createdAt: created))
             }
             return .journalState(active: try f.bool("active"), day: try f.labelString("day"), today: try f.bool("today"),
-                                 title: try f.labelString("title"), entries: entries, revision: try f.uint64("revision"))
+                                 title: try f.labelString("title"), entries: entries, revision: try f.uint64("revision"),
+                                 hidden: try f.optionalBool("hidden") ?? false)
         case "journal.request":
             let action = try f.string("action")
-            guard ["open", "close", "today", "prev", "next", "day", "add_note", "add_task"].contains(action) else {
+            guard Self.journalActions.contains(action) else {
                 throw ProtocolError.invalidField("action")
             }
             return .journalRequest(action: action, name: try f.optionalString("name"))
@@ -376,6 +379,11 @@ private struct Fields {
     func optionalHex(_ key: String) throws -> String? {
         guard obj[key] != nil, !(obj[key] is NSNull) else { return nil }
         return try hex(key)
+    }
+
+    func optionalBool(_ key: String) throws -> Bool? {
+        if obj[key] == nil || obj[key] is NSNull { return nil }
+        return try bool(key)
     }
 
     func bool(_ key: String) throws -> Bool {

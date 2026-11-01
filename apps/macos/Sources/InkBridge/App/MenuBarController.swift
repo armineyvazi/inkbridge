@@ -67,7 +67,12 @@ final class MenuBarController: NSObject, NSMenuDelegate {
             menu.addItem(toolbarSubmenu("Draw On", options, #selector(setDisplay)))
         }
         add(menu, m.background.mode == .studio ? "Back to Desktop Overlay" : "Studio Canvas", #selector(toggleStudio), key: "b")
-        add(menu, m.journalActive ? "Close Daily Journal" : "Daily Journal", #selector(toggleJournal), key: "n")
+        if m.journalActive {
+            add(menu, m.journalHidden ? "Show Daily Journal" : "Hide Daily Journal", #selector(toggleJournal), key: "n")
+            add(menu, "Close Daily Journal (Back to Work)", #selector(closeJournal))
+        } else {
+            add(menu, "Daily Journal", #selector(toggleJournal), key: "n")
+        }
         add(menu, m.engineeringActive ? "Leave Engineering" : "Engineering Workspace", #selector(toggleEngineering), key: "g")
         add(menu, m.pointerMode == .draw ? "Mouse: Use Apps (now Drawing)" : "Mouse: Draw (now Using Apps)", #selector(togglePointer), key: "d")
         menu.addItem(.separator())
@@ -123,6 +128,7 @@ final class MenuBarController: NSObject, NSMenuDelegate {
 
     @objc private func toggleStudio() { coordinator.toggleStudio() }
     @objc private func toggleJournal() { coordinator.toggleJournal() }
+    @objc private func closeJournal() { coordinator.journal.close() }
     @objc private func toggleEngineering() { coordinator.setEngineering(!coordinator.engineering.active) }
     @objc private func togglePointer() {
         coordinator.setPointerMode(coordinator.model.pointerMode == .draw ? .pointer : .draw)

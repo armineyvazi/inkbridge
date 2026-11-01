@@ -24,14 +24,15 @@ final class InkCoordinator: NSObject {
     private(set) lazy var storageWindow = StorageWindowController(coordinator: self)
     let engineering = EngineeringModel()
     private(set) lazy var journal = JournalController(coordinator: self)
-    private(set) lazy var journalPanel = JournalPanelController(journal: journal)
+    private(set) lazy var journalPanel = JournalPanelController(journal: journal, storage: storage)
     private(set) lazy var journalHistory = JournalHistoryWindow(journal: journal)
     private(set) lazy var engineeringPanel = EngineeringPanelController(model: engineering, actions: self)
     var diagramDrag: DiagramDrag?
     var sentDiagramRevision: UInt64 = 0
     var lastDiagramSyncNs: Int64 = 0
     var lastTextEdit: (id: String, at: Date)?
-    let sessionStarted = Date()
+    /// When the open session began (from its file when reopened). Was the app's launch time for every session.
+    private(set) var sessionStarted = Date()
     let log = Logger(subsystem: "app.inkbridge", category: "coordinator")
 
     private var overlayWindow: OverlayWindow?
@@ -271,6 +272,7 @@ final class InkCoordinator: NSObject {
 
     func stop() {
         // Quitting: write synchronously so the data is on disk before the process ends.
+        journal.flushPage()
         try? storage.saveNow()
         server.stop()
     }
@@ -297,9 +299,9 @@ final class InkCoordinator: NSObject {
         overlayView.onPan = { [weak self] dx, dy in self?.pan(dx, dy) }
         overlayView.onZoom = { [weak self] f, p in self?.zoom(f, at: p) }
         overlayView.onKey = { [weak self] e in self?.handleKey(e) ?? false }
-        overlayView.drawUnderInk = { [weak self] ctx, mapper in
-            self?.drawDiagram(ctx, mapper)
-            self?.journal.drawTimes(ctx, mapper)
+        overlayView.drawUnderInk = { [weak self] ctx, mapper, dirty in
+            self?.drawDiagram(ctx, mapper, dirty: dirty)
+            self?.journal.drawTimes(ctx, mapper, dirty: dirty)
         }
         applyInteraction()
         overlayWindow?.orderFrontRegardless()
@@ -312,6 +314,20 @@ final class InkCoordinator: NSObject {
 
     @objc private func screensChanged() {
         relayoutOverlay()
+    }
+
+    /// Takes the canvas window off screen (or brings it back) without touching the
+    /// document: used to put the Daily Journal away. Ink from the tablet keeps
+    /// arriving in the store and keeps being saved while the window is out.
+    func setCanvasHidden(_ hidden: Bool) {
+        if hidden {
+            overlayWindow?.orderOut(nil)
+        } else {
+            relayoutOverlay()
+            overlayWindow?.orderFrontRegardless()
+            applyInteraction()
+            overlayView?.invalidateCache()
+        }
     }
 
     func relayoutOverlay() {
@@ -368,7 +384,9 @@ final class InkCoordinator: NSObject {
 
     /// Puts back a document snapshotted in memory (leaving the journal): same
     /// strokes, background, diagram, undo/redo, session and view.
-    func restoreSession(id: String, snapshot: StrokeStore.Snapshot, viewport: Viewport) {
+    func restoreSession(id: String, snapshot: StrokeStore.Snapshot, viewport: Viewport, startedAt: Date) {
+        sessionStarted = startedAt
+        storage.documentReplaced()
         store.restore(snapshot)
         sessionID = id
         server.setSessionID(id)
@@ -391,7 +409,10 @@ final class InkCoordinator: NSObject {
     }
 
     /// Replaces the open document (new or opened session). The tablet gets a full resync.
-    func startSession(id: String, strokes: [Stroke], background: CanvasBackground, viewport: Viewport, diagram: Diagram = Diagram()) {
+    func startSession(id: String, strokes: [Stroke], background: CanvasBackground, viewport: Viewport, diagram: Diagram = Diagram(),
+                      startedAt: Date = Date()) {
+        sessionStarted = startedAt
+        storage.documentReplaced()
         store.endAll()
         store.load(strokes, background: background, diagram: diagram)
         engineering.selection = []

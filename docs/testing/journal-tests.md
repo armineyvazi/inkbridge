@@ -18,3 +18,22 @@
 | **BOOX hardware** over Wi-Fi: work → open journal from the tablet → handwriting + keyboard note → close | adb-driven | ✅ note saved with timestamp; Mac restored the work session; **before/after screens byte-identical** |
 | Real midnight while open | — | ⏳ logic unit-tested; not run across a real midnight |
 | Mac journal panel and history window by hand | — | ⏳ needs real clicks |
+
+## v2: redesign, hide/show, performance
+
+| Scenario | How | Result |
+|---|---|---|
+| Hide → write while hidden → show → close (real app, simulated tablet) | simulator `--journal-flow --journal-hide` | ✅ saving continued while hidden (`saving → saved` in the day folder); 2 strokes + 3 entries; work restored with its own title |
+| Journal start time is its own; work title not leaked | same run, files on disk | ✅ (both bugs found in real use) |
+| Typed draft survives journal updates; put-away banner; Show on Mac sends `show` | `UiTest.journalSheetShowsPutAwayStateAndKeepsATypedNoteAcrossUpdates` | ✅ |
+| Dashboard journal card only when open and connected | `UiTest.dashboardJournalCardOnlyWhileTheJournalIsOpenAndConnected` | ✅ |
+| `hidden` optional on the wire, `hide`/`show` valid (both platforms) | `JournalProtocolTests`, `JournalProtocolTest` | ✅ |
+| Incremental save: append/full decision, reload order, no duplicates, torn line, compaction | `IncrementalSaveTests` (3) | ✅ |
+| History over 400 days | `JournalPerformanceTests.testHistoryWithHundredsOfDays` | ✅ index once (283 ms, background), search 2.4 ms per keystroke vs 273 ms re-reading disk |
+| Culled stroke rendering is pixel-identical | `testCulledStrokeIsPixelIdenticalInTheDirtyRect` | ✅ |
+| Handwriting previews | `JournalIndexTests.testThumbnailDrawsInkAndIsEmptyForNoInk` | ✅ |
+| Panel design review (light/dark, empty state) | `InkBridge --render-journal DIR [--dark]` | ✅ reviewed; fixed wrapped times and preview sizing |
+| Tablet sheet design review | `make -C apps/android screenshots` → `7-journal.png` | ✅ reviewed; removed a duplicate button |
+| **BOOX:** latency, online vs Wi-Fi off | on-device recorders | ✅ identical (30.3 vs 29.7 ms p50) |
+| **BOOX:** lock-then-drain A/B | `inkrun.sh 1` vs `0` | ⏳ tablet PIN-locked during the session |
+| Mac panel/history by real clicks | — | ⏳ no Accessibility permission here |

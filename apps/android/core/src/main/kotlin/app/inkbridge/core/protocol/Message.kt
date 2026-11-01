@@ -120,10 +120,10 @@ sealed interface Payload {
     }
     /** Host → device: the Daily Journal (open or not, which day, its timestamped entries). */
     data class Journal(val active: Boolean, val day: String, val today: Boolean, val title: String,
-                       val entries: List<JournalItem>, val revision: Long) : Payload {
+                       val entries: List<JournalItem>, val revision: Long, val hidden: Boolean = false) : Payload {
         override val type get() = "journal.state"
     }
-    /** Device → host: open, close, today, prev, next, day (name = yyyy-MM-dd), add_note, add_task. */
+    /** Device → host: open, close, today, prev, next, day (name = yyyy-MM-dd), add_note, add_task, hide, show. */
     data class JournalRequest(val action: String, val name: String? = null) : Payload {
         override val type get() = "journal.request"
     }

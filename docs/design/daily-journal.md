@@ -1,5 +1,9 @@
 # Daily Journal & Quick Capture
 
+> **v2 (2026-11-01, late):** redesigned panel and History, **hide without leaving** (📖 / ⌃⌥N cycle
+> open → put away → back), handwriting previews, incremental saving. See *Redesign* below and
+> `docs/performance/writing-latency.md`.
+
 One click (toolbar 📖, **⌃⌥N**, the menu bar, or 📖 on the BOOX canvas) opens today's page. Write, draw or type a note, then **Done** returns to exactly what was open before.
 
 ## How it works
@@ -22,3 +26,35 @@ One click (toolbar 📖, **⌃⌥N**, the menu bar, or 📖 on the BOOX canvas) 
 - **Rich typed text on the canvas.** Typed notes live in the panel list, not on the page.
 - **An offline journal on the tablet.** Offline ink goes to whatever document the Mac has open when the tablet reconnects.
 - **Simultaneous edits** are resolved by the Mac applying requests in arrival order.
+
+## Redesign (v2)
+
+Reviewed against Apple Notes, Apple Journal, Goodnotes, Craft, Notion and Obsidian. What we took from them is interaction patterns, not looks:
+- The page is the writing surface. The panel is a narrow companion, never a second editor.
+- One date header with the day relative to today ("TODAY · SUNDAY"), and ‹ › to move between days.
+- One timeline in writing order. Each entry has its time, a small rail dot by kind, and its content. Handwriting shows as a preview of the ink.
+- Actions appear in context: on hover, in a right-click menu, or under ⋯. They don't take permanent space.
+- A single composer at the bottom. Return adds the entry, and the Note/Task switch sits inside the field.
+- A quiet save state: Saved, Saving…, Edited, or a red "Not saved" with the reason.
+
+| Area | Mac | BOOX |
+|---|---|---|
+| Navigation | ‹ date › (click the date for a calendar), Today (⌘T), ⌘[ / ⌘], 🔍 History (⌘F), ⋯ menu | ‹ date › and "Go to today" |
+| Entries | time column, previews of handwriting (click → the page pans to it), editable notes/tasks, hover delete | time column (monospace), ✎ / ☐ / ☑, last 30 |
+| Capture | composer: note ↔ task, Return | Note/Task segmented + field + ✓; a typed draft survives updates |
+| Hide | panel close button, **Hide**, 📖, ⌃⌥N | "Hide on Mac" / "Show on Mac"; leaving the canvas keeps the journal open and the dashboard shows **Continue writing** |
+| Leave | **Done** (⌘Return), menu "Close Daily Journal (Back to Work)" | "Done — back to work" |
+| History | sidebar: search, month (dots on days with entries), day list with counts; detail: the day's timeline with previews, **Open in Journal** | — (the Mac owns history) |
+
+## Hide without leaving
+
+- **Hiding:** puts away the canvas window and the panel. Nothing is unloaded. The day, ink, entries, view, tool, selection, panel scroll and a half-typed draft all stay in memory. A save starts but nothing waits for it. Autosave and tablet sync keep running, so the tablet can keep writing into the hidden journal and every stroke is saved.
+- **Showing:** brings both windows back exactly as they were.
+- **Protocol:** `journal.state` carries `hidden`, and `journal.request` accepts `hide` and `show`.
+- **Verified on the real app** with the simulated tablet. Open, write, add a note, hide, write a stroke and a note while hidden, show, close. The day ends up with 2 strokes and 3 timestamped entries, and the work session is restored with its own title and strokes.
+
+## Bugs found in real use and fixed
+
+- **Work session renamed:** after closing the journal, the work session was renamed "Journal <day>". The title field commits when its panel hides, and the edit landed after close. Edits now require the journal to be open.
+- **Wrong start times:** every session recorded the app's launch time as its start, and the journal day inherited the work session's. Each session now keeps its own start.
+- **Lost draft on the tablet:** a half-typed note on the tablet was lost whenever new ink arrived. The field is now kept across updates (UI test).

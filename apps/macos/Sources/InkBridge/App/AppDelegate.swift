@@ -17,6 +17,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
            let t = DiagramTemplate(rawValue: args[i + 1]) {
             exit(SelfTest.render(t, to: URL(fileURLWithPath: args[i + 2]), dark: args.contains("--dark")))
         }
+        if let i = args.firstIndex(of: "--render-journal"), args.count > i + 1 {
+            exit(SelfTest.renderJournal(to: URL(fileURLWithPath: args[i + 1]), dark: args.contains("--dark")))
+        }
         // A menu-bar utility: no Dock icon, never steals focus by launching.
         NSApp.setActivationPolicy(.accessory)
 

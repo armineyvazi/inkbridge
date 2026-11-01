@@ -122,6 +122,13 @@ public enum SessionArchive {
         return e
     }()
 
+    /// For strokes.json (machine data, the bulk of every save): no pretty-printing.
+    static let compactEncoder: JSONEncoder = {
+        let e = JSONEncoder()
+        e.dateEncodingStrategy = .iso8601
+        return e
+    }()
+
     static let decoder: JSONDecoder = {
         let d = JSONDecoder()
         d.dateDecodingStrategy = .iso8601
@@ -133,7 +140,7 @@ public enum SessionArchive {
     /// Writes metadata and strokes only. Cheap enough for autosave.
     public static func writeStrokes(_ strokes: [Stroke], metadata: SessionMetadata, diagram: Diagram = Diagram(), to dir: URL) throws {
         try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
-        try encoder.encode(strokes).write(to: dir.appendingPathComponent("strokes.json"), options: .atomic)
+        try compactEncoder.encode(strokes).write(to: dir.appendingPathComponent("strokes.json"), options: .atomic)
         let diagramURL = dir.appendingPathComponent("diagram.json")
         if diagram.isEmpty {
             try? FileManager.default.removeItem(at: diagramURL)
@@ -141,6 +148,8 @@ public enum SessionArchive {
             try encoder.encode(diagram).write(to: diagramURL, options: .atomic)
         }
         try encoder.encode(metadata).write(to: dir.appendingPathComponent("session.json"), options: .atomic)
+        // strokes.json now holds everything: the append log is folded in (compaction).
+        try? FileManager.default.removeItem(at: dir.appendingPathComponent(logName))
     }
 
     /// `metadata.background` carries the background layer; nil means a pre-background session (overlay).
@@ -152,8 +161,10 @@ public enum SessionArchive {
     public static func load(from dir: URL) throws -> (SessionMetadata, [Stroke]) {
         let meta = try decoder.decode(SessionMetadata.self, from: Data(contentsOf: dir.appendingPathComponent("session.json")))
         guard meta.format == SessionMetadata.currentFormat else { throw ArchiveError.unsupportedFormat(meta.format) }
-        let strokes = try decoder.decode([Stroke].self, from: Data(contentsOf: dir.appendingPathComponent("strokes.json")))
-        return (meta, strokes)
+        // A session saved only by appends so far has no strokes.json yet.
+        let file = dir.appendingPathComponent("strokes.json")
+        let base = FileManager.default.fileExists(atPath: file.path) ? try decoder.decode([Stroke].self, from: Data(contentsOf: file)) : []
+        return (meta, replayLog(in: dir, onto: base))
     }
 
     // MARK: Export

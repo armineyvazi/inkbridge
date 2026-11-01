@@ -26,7 +26,7 @@ final class OverlayView: NSView {
     /// Key commands while the studio has focus; returns true if handled.
     var onKey: ((NSEvent) -> Bool)?
     /// Drawn after the background and before ink: the engineering diagram.
-    var drawUnderInk: ((CGContext, CoordinateMapper) -> Void)?
+    var drawUnderInk: ((CGContext, CoordinateMapper, CGRect) -> Void)?
     private(set) var lastClickCount = 1
     private(set) var lastShift = false
     var crosshair = false {
@@ -110,7 +110,7 @@ final class OverlayView: NSView {
         // Background layer first (own layer: never baked into the stroke cache).
         if store.background.mode == .overlay { ctx.clear(dirtyRect) }
         BackgroundRenderer.draw(store.background, in: ctx, mapper: mapper, rect: dirtyRect)
-        drawUnderInk?(ctx, mapper)
+        drawUnderInk?(ctx, mapper, dirtyRect)
         if cacheRevision != store.revision { rebuildCache() }
         if let cache {
             // CGImages draw bottom-up; undo the view's flip for the blit.
@@ -121,7 +121,7 @@ final class OverlayView: NSView {
             ctx.restoreGState()
         }
         for stroke in store.active.values {
-            StrokeRenderer.draw(stroke, in: ctx, mapper: mapper)
+            StrokeRenderer.draw(stroke, in: ctx, mapper: mapper, clip: dirtyRect)
         }
         let now = Date().timeIntervalSinceReferenceDate
         for (stroke, endedAt) in store.laser {

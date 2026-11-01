@@ -33,6 +33,26 @@ import java.util.concurrent.atomic.AtomicBoolean
  * would vanish on e-ink, so pens draw black and highlighters grey.
  */
 class CanvasRenderer(private val document: CanvasDocument) {
+    companion object {
+        /** Stylus sample time → its segment posted to the e-ink surface (the app's share of ink latency). */
+        val inkLatency = app.inkbridge.core.input.LatencyRecorder()
+        /** Time spent drawing and posting one incremental frame on the render thread. */
+        val frameTime = app.inkbridge.core.input.LatencyRecorder()
+        /** Lock margin around new ink: a pen moves well under this in one 25 ms frame. */
+        const val LOCK_MARGIN_PX = 96
+        /** `adb shell setprop debug.inkbridge.legacyframe 1`: the old frame order, for A/B measurement. */
+        val legacyFrame: Boolean by lazy {
+            runCatching {
+                Class.forName("android.os.SystemProperties").getMethod("get", String::class.java)
+                    .invoke(null, "debug.inkbridge.legacyframe") == "1"
+            }.getOrDefault(false)
+        }
+        // Breakdown of a frame: drawing new segments into the cache, lockCanvas, copy + unlockAndPost.
+        val drawTime = app.inkbridge.core.input.LatencyRecorder()
+        val lockTime = app.inkbridge.core.input.LatencyRecorder()
+        val postTime = app.inkbridge.core.input.LatencyRecorder()
+    }
+
     private val thread = HandlerThread("ink-render").apply { start() }
     private val handler = Handler(thread.looper)
 
@@ -155,12 +175,13 @@ class CanvasRenderer(private val document: CanvasDocument) {
         post(h, null)
     }
 
-    private fun renderIncremental(h: SurfaceHolder) {
-        val c = cacheCanvas ?: return
-        if (!inkVisible) return
+    /** Ink drawn into the cache but outside the last locked region; posted next frame. */
+    private val carry = Rect()
+
+    /** Draws new samples of pending strokes into the cache; returns the oldest new sample's time. */
+    private fun drainPending(c: Canvas, v: Viewport, dirty: Rect): Long {
+        var oldest = Long.MAX_VALUE
         val ids = synchronized(pendingIds) { pendingIds.toList().also { pendingIds.clear() } }
-        val v = viewport
-        val dirty = Rect()
         for (id in ids) {
             val done = drawnUpTo[id] ?: 0
             // Start one point back so the new segment joins the previous one.
@@ -168,8 +189,64 @@ class CanvasRenderer(private val document: CanvasDocument) {
             if (pts.isEmpty()) continue
             dirty.union(drawSegments(c, pts, style, tool, v, from = 0))
             drawnUpTo[id] = maxOf(done - 1, 0) + pts.size
+            oldest = minOf(oldest, pts[if (done > 0 && pts.size > 1) 1 else 0].t)
         }
-        if (!dirty.isEmpty) post(h, dirty)
+        return oldest
+    }
+
+    /**
+     * lockCanvas waits for the next display frame (the Note Air 2 Plus panel runs
+     * at 40 Hz: ~20 ms of a 25 ms frame was spent here). Samples that arrived
+     * during that wait used to miss the frame. Now the region is locked with a
+     * margin around the new ink, and the samples that arrived meanwhile are drawn
+     * before posting; anything outside the margin is carried to the next frame.
+     */
+    private fun renderIncremental(h: SurfaceHolder) {
+        val c = cacheCanvas ?: return
+        val bmp = cache ?: return
+        if (!inkVisible) return
+        val start = System.nanoTime()
+        val v = viewport
+        val dirty = Rect(carry).also { carry.setEmpty() }
+        var oldest = drainPending(c, v, dirty)
+        if (dirty.isEmpty) return
+        drawTime.add((System.nanoTime() - start) / 1e6)
+        if (legacyFrame) {
+            post(h, dirty, timed = true)
+            val end = System.nanoTime()
+            frameTime.add((end - start) / 1e6)
+            if (oldest != Long.MAX_VALUE && oldest > 0) inkLatency.add((end - oldest) / 1e6)
+            return
+        }
+        val margin = LOCK_MARGIN_PX
+        val locked = Rect(dirty).apply { inset(-margin, -margin); intersect(0, 0, bmp.width, bmp.height) }
+        val t0 = System.nanoTime()
+        val canvas = h.lockCanvas(Rect(locked)) ?: run { carry.union(dirty); return }
+        val t1 = System.nanoTime()
+        try {
+            val late = Rect()
+            oldest = minOf(oldest, drainPending(c, v, late))
+            if (!late.isEmpty) {
+                if (locked.contains(late)) dirty.union(late) else carry.union(late)
+            }
+            canvas.drawBitmap(bmp, 0f, 0f, null)
+        } finally {
+            h.unlockCanvasAndPost(canvas)
+        }
+        val end = System.nanoTime()
+        lockTime.add((t1 - t0) / 1e6)
+        postTime.add((end - t1) / 1e6)
+        if (!carry.isEmpty) schedule()
+        run {
+            frameTime.add((end - start) / 1e6)
+            // Sample times are MotionEvent times (CLOCK_MONOTONIC), the same clock as nanoTime.
+            // The oldest new sample in the frame: the worst latency it contains.
+            if (oldest != Long.MAX_VALUE && oldest > 0) inkLatency.add((end - oldest) / 1e6)
+            if (frameTime.size % 200 == 0) {
+                android.util.Log.i("InkBridge", "perf ink(sample→posted) ${inkLatency.summary()} · frame ${frameTime.summary()}" +
+                    " · draw ${drawTime.summary()} · lock ${lockTime.summary()} · copy+post ${postTime.summary()}")
+            }
+        }
     }
 
     private fun drawPreview(h: SurfaceHolder, pv: Viewport) {
@@ -316,13 +393,19 @@ class CanvasRenderer(private val document: CanvasDocument) {
     }
 
     /** Copies the cache to the surface; [dirty] null means the whole surface. */
-    private fun post(h: SurfaceHolder, dirty: Rect?) {
+    private fun post(h: SurfaceHolder, dirty: Rect?, timed: Boolean = false) {
         val bmp = cache ?: return
+        val t0 = System.nanoTime()
         val canvas = (if (dirty != null) h.lockCanvas(dirty) else h.lockCanvas()) ?: return
+        val t1 = System.nanoTime()
         try {
             canvas.drawBitmap(bmp, 0f, 0f, null)
         } finally {
             h.unlockCanvasAndPost(canvas)
+        }
+        if (timed) {
+            lockTime.add((t1 - t0) / 1e6)
+            postTime.add((System.nanoTime() - t1) / 1e6)
         }
     }
 

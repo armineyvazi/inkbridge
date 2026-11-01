@@ -16,3 +16,7 @@
 | Journal timestamps lost milliseconds on save | `JournalTests.testDaysAreIndependentAndSearchable` / ms storage |
 | Crash recovery pointed at a closed journal | Verified on the real app |
 | Empty connector labels rejected by the codec | `EngineeringTests.testDiagramPersistsWithTheSessionAndOnTheWire` |
+| Journal title field committed after close and renamed the work session (real use) | guarded edits; verified with `--journal-hide` run |
+| Every session recorded the app launch time as its start | verified on disk (journal 18:26:08 vs work 18:26:00) |
+| Tablet journal draft lost when new ink arrived | `UiTest.journalSheetShowsPutAwayStateAndKeepsATypedNoteAcrossUpdates` |
+| Journal page save blocked the main thread ~80 ms per stroke | `JournalPerformanceTests.testPersistenceCost` (now 1.3 ms, background) |

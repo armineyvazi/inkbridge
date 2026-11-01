@@ -61,7 +61,7 @@ fun main(args: Array<String>): Unit = runBlocking(Dispatchers.Default) {
     client.onHostPayload = { p ->
         doc.applyHost(p)
         if (p is app.inkbridge.core.protocol.Payload.Journal) {
-            println("journal from host: active=${p.active} day=${p.day} today=${p.today} entries=${p.entries.map { it.kind + ":" + it.text }}")
+            println("journal from host: active=${p.active} hidden=${p.hidden} day=${p.day} today=${p.today} entries=${p.entries.map { it.kind + ":" + it.text }}")
         }
         if (p is app.inkbridge.core.protocol.Payload.Storage) {
             val st = p.state
@@ -146,6 +146,16 @@ fun main(args: Array<String>): Unit = runBlocking(Dispatchers.Default) {
         processor.process(PointerAction.UP, ToolKind.STYLUS, false, listOf(sample(600f, 390f))).forEach(client::submit)
         delay(1_000)
         client.submitJournalRequest("add_note", "Simulated thought from the tablet"); delay(1_000)
+        // --journal-hide: put the journal away on the Mac, keep writing, bring it back.
+        if ("--journal-hide" in opts) {
+            client.submitJournalRequest("hide"); delay(1_500)
+            processor.process(PointerAction.DOWN, ToolKind.STYLUS, false, listOf(sample(300f, 600f))).forEach(client::submit)
+            for (k in 1..30) { processor.process(PointerAction.MOVE, ToolKind.STYLUS, false, listOf(sample(300f + k * 10, 600f - k * 3))).forEach(client::submit); delay(5) }
+            processor.process(PointerAction.UP, ToolKind.STYLUS, false, listOf(sample(600f, 510f))).forEach(client::submit)
+            delay(500)
+            client.submitJournalRequest("add_note", "Written while the journal was put away"); delay(2_500)
+            client.submitJournalRequest("show"); delay(1_500)
+        }
         if ("--journal-stay" !in opts) { client.submitJournalRequest("close"); delay(2_000) }
     }
     delay(1_000) // let the queue drain and a final ping land

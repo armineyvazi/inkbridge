@@ -92,6 +92,8 @@ final class AppModel: ObservableObject {
     /// Mirror of the Engineering workspace switch, for the toolbar.
     @Published var engineeringActive = false
     @Published var journalActive = false
+    /// The journal is open but put away (its canvas and panel are hidden; saving and sync continue).
+    @Published var journalHidden = false
     /// Mirror of the document's background layer (the store is the source of truth).
     @Published var background: CanvasBackground = .overlay
     /// Colour Studio Canvas returns to when toggled on from the overlay.

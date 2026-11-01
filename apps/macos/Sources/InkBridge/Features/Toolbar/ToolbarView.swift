@@ -134,15 +134,20 @@ struct ToolbarView: View {
 
     /// Daily Journal: today's page, one click in and out (⌃⌥N).
     private var journalButton: some View {
-        let on = model.journalActive
+        let on = model.journalActive, away = model.journalHidden
         return Button { actions?.toggleJournal() } label: {
-            Image(systemName: on ? "book.fill" : "book")
+            Image(systemName: on && !away ? "book.fill" : "book")
                 .frame(width: 28, height: 26)
-                .background(on ? Color.accentColor.opacity(0.25) : .clear)
+                .background(on && !away ? Color.accentColor.opacity(0.25) : .clear)
                 .clipShape(RoundedRectangle(cornerRadius: 6))
+                // Put away, still open: a dot, like a minimised window in the Dock.
+                .overlay(alignment: .bottom) {
+                    if away { Circle().fill(Color.accentColor).frame(width: 4, height: 4).offset(y: 1) }
+                }
         }
         .buttonStyle(.plain)
-        .help(on ? "Close the journal and return to your work (⌃⌥N)" : "Daily Journal: capture a thought, then come back (⌃⌥N)")
+        .help(!on ? "Daily Journal: capture a thought, then come back (⌃⌥N)"
+              : away ? "Show the Daily Journal, as you left it (⌃⌥N)" : "Hide the journal and use your desktop; it stays open (⌃⌥N)")
     }
 
     /// Engineering workspace: diagram components, connectors, templates (⌃⌥G).

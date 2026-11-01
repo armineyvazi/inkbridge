@@ -1,3 +1,4 @@
+import SwiftUI
 import AppKit
 import InkBridgeCore
 
@@ -87,4 +88,54 @@ enum SelfTest {
         print("rendered \(t.rawValue): \(d.nodes.count) components, \(d.edges.count) connectors → \(url.path)")
         return 0
     }
+
+    /// Developer: renders the journal panel (and History) with sample content, for design review
+    /// without screen-recording permission. `--render-journal OUT_DIR [--dark]`.
+    static func renderJournal(to dir: URL, dark: Bool) -> Int32 {
+        let c = InkCoordinator(model: AppModel())
+        // Two bursts of "handwriting": looping strokes like cursive.
+        func word(_ id: String, x0: Double, y0: Double, len: Int) -> Stroke {
+            Stroke(id: id, tool: .pen, style: StrokeStyle(color: .black, width: 3, pressureSensitive: true),
+                   points: (0..<len).map { k in
+                       let t = Double(k) / 6
+                       return InkPoint(x: x0 + t * 9 + cos(t * 2.1) * 8, y: y0 + sin(t * 2.1) * 14 + sin(t * 0.7) * 4, p: 0.4 + 0.4 * abs(sin(t)), t: Int64(k))
+                   })
+        }
+        let strokes = [word("a1", x0: 200, y0: 300, len: 160), word("a2", x0: 420, y0: 300, len: 120),
+                       word("b1", x0: 200, y0: 520, len: 200)]
+        c.store.load(strokes)
+        let cal = Calendar.current
+        let at = { (h: Int, m: Int) in cal.date(bySettingHour: h, minute: m, second: 0, of: Date())! }
+        var page = JournalPage(day: JournalCalendar.dayID(for: Date()), title: "Planning the sync engine")
+        page.trackInk(present: ["a1", "a2"], at: at(9, 15))
+        _ = page.addNote("Offline-first: the tablet never waits for the Mac before drawing", at: at(9, 24))
+        _ = page.addNote("Measure input → ink on the BOOX", kind: .task, at: at(10, 2))
+        let done = page.addNote("Book the design review", kind: .task, at: at(10, 5))
+        page.update(done.id, done: true, at: at(11, 40))
+        page.trackInk(present: ["a1", "a2", "b1"], at: at(14, 31))
+        c.journal.page = page
+        let appearance = NSAppearance(named: dark ? .darkAqua : .aqua)
+        var ok = true
+        func snap<V: View>(_ v: V, _ size: NSSize, _ name: String) {
+            let host = NSHostingView(rootView: v.frame(width: size.width, height: size.height))
+            host.frame = NSRect(origin: .zero, size: size)
+            let w = NSWindow(contentRect: host.frame, styleMask: [.borderless], backing: .buffered, defer: false)
+            w.appearance = appearance
+            w.backgroundColor = dark ? NSColor(white: 0.16, alpha: 1) : NSColor(white: 0.97, alpha: 1)
+            w.contentView = host
+            host.layoutSubtreeIfNeeded()
+            RunLoop.main.run(until: Date().addingTimeInterval(0.6))  // thumbnails, async loads
+            guard let rep = host.bitmapImageRepForCachingDisplay(in: host.bounds) else { ok = false; return }
+            host.cacheDisplay(in: host.bounds, to: rep)
+            let url = dir.appendingPathComponent("\(name)\(dark ? "-dark" : "").png")
+            if (try? rep.representation(using: .png, properties: [:])?.write(to: url)) == nil { ok = false }
+            print("rendered \(url.path)")
+        }
+        try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        snap(JournalPanelView(journal: c.journal, storage: c.storage), NSSize(width: 308, height: 620), "journal-panel")
+        c.journal.page = JournalPage(day: JournalCalendar.dayID(for: Date()))
+        snap(JournalPanelView(journal: c.journal, storage: c.storage), NSSize(width: 308, height: 420), "journal-panel-empty")
+        return ok ? 0 : 1
+    }
 }
+

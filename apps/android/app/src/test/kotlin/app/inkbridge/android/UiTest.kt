@@ -22,10 +22,11 @@ import app.inkbridge.core.protocol.Tool
 import app.inkbridge.core.protocol.InkPoint
 import app.inkbridge.core.protocol.WireStyle
 import app.inkbridge.core.canvas.CanvasBackground
-import app.inkbridge.core.protocol.JournalItem
 import app.inkbridge.core.protocol.Payload
 import app.inkbridge.android.features.storage.StorageActivity
 import app.inkbridge.core.protocol.StorageState
+import app.inkbridge.android.features.canvas.JournalSheet
+import app.inkbridge.core.protocol.JournalItem
 import org.junit.Before
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -286,7 +287,7 @@ class UiTest {
         app.connection.defaultHostHandler(Payload.Journal(true, "2026-11-01", true, "Sync ideas",
             listOf(JournalItem("j1", "note", "Offline-first storage", false, 1_793_425_500_000)), 4))
         idle()
-        assertTrue("Daily Journal · 2026-11-01 · Today" in root.texts(), root.texts().toString())
+        assertTrue(root.texts().any { it.startsWith("Daily Journal · Sunday, 1 November 2026 · Today") }, root.texts().toString())
     }
 
     @Test
@@ -311,12 +312,48 @@ class UiTest {
         val handler = assertNotNull(app.connection.client.onHostPayload)
         handler(Payload.Journal(true, "2026-11-01", true, "", emptyList(), 1))
         idle()
-        assertTrue("Daily Journal · 2026-11-01 · Today" in a.window.decorView.texts())
+        assertTrue(a.window.decorView.texts().any { it.startsWith("Daily Journal · Sunday, 1 November 2026 · Today") })
         handler(Payload.Journal(false, "2026-11-01", true, "", emptyList(), 2))  // the Mac closed the journal
         idle()
         assertTrue(a.window.decorView.texts().none { it.startsWith("Daily Journal ·") }, "header goes away when the Mac closes the journal")
         assertEquals(false, app.connection.journal.value?.active)
     }
+
+    @Test
+    fun journalSheetShowsPutAwayStateAndKeepsATypedNoteAcrossUpdates() {
+        val a = Robolectric.buildActivity(CanvasActivity::class.java).setup().get()
+        val asked = mutableListOf<String>()
+        val sheet = JournalSheet(a, { action, _ -> asked += action; true }, {})
+        val open = Payload.Journal(true, "2026-11-01", true, "", emptyList(), 1, hidden = false)
+        sheet.render(open, connected = true)
+        val field = sheet.findViews<EditText>().single()
+        field.setText("half a thought")
+        // New handwriting on the page: the Mac sends an update while the note is being typed.
+        sheet.render(open.copy(entries = listOf(JournalItem("j1", "ink", "", false, 1_793_500_000_000)), revision = 2), connected = true)
+        assertEquals("half a thought", sheet.findViews<EditText>().single().text.toString(), "a typed note survives updates")
+        assertTrue(sheet.texts().contains("Hide on Mac"))
+        sheet.render(open.copy(hidden = true, revision = 3), connected = true)
+        assertTrue(sheet.texts().any { it.startsWith("Put away on your Mac") }, sheet.texts().toString())
+        var button: View = sheet.findViews<TextView>().single { it.text == "Show on Mac" }
+        while (!button.hasOnClickListeners()) button = button.parent as View
+        button.performClick()
+        assertEquals(listOf("show"), asked)
+    }
+
+    @Test
+    fun dashboardJournalCardOnlyWhileTheJournalIsOpenAndConnected() {
+        val a = Robolectric.buildActivity(DashboardActivity::class.java).setup().get()
+        app.connection.defaultHostHandler(Payload.Journal(true, "2026-11-01", true, "", emptyList(), 1, hidden = true))
+        idle()
+        var card: View = a.window.decorView.findViews<TextView>().first { it.text == "Daily Journal is open" }
+        while (card.parent is View && card.visibility == View.VISIBLE) card = card.parent as View
+        assertEquals(View.GONE, card.visibility, "offline: the Mac's journal can't be continued, so no card")
+    }
+
+    private fun View.allViews(): List<View> =
+        listOf(this) + ((this as? ViewGroup)?.let { g -> (0 until g.childCount).flatMap { g.getChildAt(it).allViews() } } ?: emptyList())
+
+    private inline fun <reified T : View> View.findViews(): List<T> = allViews().filterIsInstance<T>()
 
     @Test
     fun diagnosticsNeverShowsSecrets() {

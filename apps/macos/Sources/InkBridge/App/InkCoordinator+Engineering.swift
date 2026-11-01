@@ -249,10 +249,11 @@ extension InkCoordinator: EngineeringActions {
     }
 
     /// Transient drawing for the overlay: diagram, selection, connector preview, marquee.
-    func drawDiagram(_ ctx: CGContext, _ mapper: CoordinateMapper) {
+    func drawDiagram(_ ctx: CGContext, _ mapper: CoordinateMapper, dirty: CGRect) {
+        guard !store.diagram.isEmpty || diagramDrag != nil else { return }
         let theme = DiagramRenderer.Theme.forBackground(store.background)
         DiagramRenderer.draw(store.diagram, in: ctx, mapper: mapper, theme: theme,
-                             selection: engineering.active ? engineering.selection : [], icon: Self.icon)
+                             selection: engineering.active ? engineering.selection : [], icon: Self.icon, dirty: dirty)
         switch diagramDrag {
         case let .connect(from, to)?:
             guard let a = store.diagram.node(from) else { return }

@@ -223,7 +223,10 @@ class CanvasActivity : InkActivity() {
 
     /** Header across the top while the journal is open: which day the ink goes to. */
     private fun renderJournal(j: app.inkbridge.core.protocol.Payload.Journal?, connected: Boolean) {
-        val text = if (j?.active == true) "Daily Journal · ${j.day}" + (if (j.today) " · Today" else "") else ""
+        val text = if (j?.active == true) {
+            val (weekday, date) = JournalSheet.formatDay(j.day)
+            "Daily Journal · $weekday, $date" + (if (j.today) " · Today" else "") + (if (j.hidden) " · put away on Mac" else "")
+        } else ""
         Ink.setText(journalHeader, text)
         journalHeader.visibility = if (text.isEmpty()) View.GONE else View.VISIBLE
         journalSheet?.render(j, connected)

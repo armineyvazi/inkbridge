@@ -16,6 +16,8 @@ import InkBridgeCore
 /// open "today" journal to the new day; older days stay as they were.
 final class JournalController: ObservableObject {
     @Published private(set) var active = false
+    /// Open but put away: canvas and panel hidden, journal still loaded, saving and sync continue.
+    @Published private(set) var hidden = false
     @Published private(set) var day = JournalCalendar.dayID(for: Date())
     @Published var page = JournalPage(day: JournalCalendar.dayID(for: Date()))
     @Published var showTimes: Bool { didSet { UserDefaults.standard.set(showTimes, forKey: "journalShowTimes"); coordinator.overlayView?.needsDisplay = true } }
@@ -34,6 +36,7 @@ final class JournalController: ObservableObject {
         var sessionID: String
         var project: String
         var title: String
+        var startedAt: Date
         var viewport: Viewport
         var tool: Tool
         var pointer: PointerMode
@@ -61,14 +64,46 @@ final class JournalController: ObservableObject {
 
     // MARK: Open / close
 
-    func toggle() { active ? close() : open() }
+    /// The 📖 button and ⌃⌥N: open → put away → bring back. "Done" leaves the journal.
+    func toggle() {
+        if !active { open() } else if hidden { show() } else { hide() }
+    }
+
+    /// Puts the journal away so the desktop can be used, without leaving it: the day,
+    /// ink, entries, view, tool, panel (scroll, draft text) all stay in memory. A save is
+    /// started (not awaited); autosave and tablet sync keep running while hidden.
+    func hide() {
+        guard active, !hidden else { return }
+        let c = coordinator
+        hidden = true
+        c.model.journalHidden = true
+        savePage()
+        c.storage.save()
+        c.journalPanel.hide()
+        c.setCanvasHidden(true)
+        sendState()
+    }
+
+    /// Brings a put-away journal back exactly as it was.
+    func show() {
+        guard active, hidden else { return }
+        let c = coordinator
+        hidden = false
+        c.model.journalHidden = false
+        c.setCanvasHidden(false)
+        c.journalPanel.show(on: c.targetScreen)
+        sendState()
+    }
 
     /// Opens a day (today by default). Asks once where journal files should live.
     func open(day requested: String? = nil) {
         if !UserDefaults.standard.bool(forKey: "journalRootChosen") && !chooseLocationFirstTime() { return }
         let target = requested ?? JournalCalendar.dayID(for: Date())
         guard JournalCalendar.isValid(target) else { return }
-        if active { return switchDay(to: target) }
+        if active {
+            if hidden { show() }
+            return switchDay(to: target)
+        }
         let c = coordinator
         do { try c.storage.saveNow() } catch {
             // The open work could not be saved: do not replace it.
@@ -76,7 +111,7 @@ final class JournalController: ObservableObject {
             return
         }
         saved = Saved(snapshot: c.store.snapshot(), sessionID: c.sessionID, project: c.storage.activeProject,
-                      title: c.storage.sessionTitle, viewport: c.ingestor.viewport, tool: c.model.tool,
+                      title: c.storage.sessionTitle, startedAt: c.sessionStarted, viewport: c.ingestor.viewport, tool: c.model.tool,
                       pointer: c.model.pointerMode, engineering: c.engineering.active)
         if c.engineering.active { c.setEngineering(false) }
         active = true
@@ -90,14 +125,22 @@ final class JournalController: ObservableObject {
         guard active, let s = saved else { return }
         let c = coordinator
         savePage()
+        flushPage()
         try? c.storage.saveNow()
+        if hidden {
+            hidden = false
+            c.model.journalHidden = false
+            c.setCanvasHidden(false)
+        }
         active = false
         c.model.journalActive = false
         midnightTimer?.invalidate()
         c.journalPanel.hide()
         // Back to exactly what was open: same document object state, undo history, view and tools.
         c.storage.journalDir = nil
-        c.restoreSession(id: s.sessionID, snapshot: s.snapshot, viewport: s.viewport)
+        // Title first: restoring announces the storage state, which must not pair the work with the journal's title.
+        c.storage.sessionTitle = s.title
+        c.restoreSession(id: s.sessionID, snapshot: s.snapshot, viewport: s.viewport, startedAt: s.startedAt)
         c.storage.restore(project: s.project, title: s.title)
         // Crash recovery must reopen the work, not the journal that was just closed.
         UserDefaults.standard.set(s.project, forKey: "lastSessionProject")
@@ -112,6 +155,7 @@ final class JournalController: ObservableObject {
     func switchDay(to target: String) {
         guard active, target != day, JournalCalendar.isValid(target) else { return }
         savePage()
+        flushPage()
         try? coordinator.storage.saveNow()
         load(target)
     }
@@ -129,15 +173,18 @@ final class JournalController: ObservableObject {
         var strokes: [Stroke] = []
         var bg = Self.paper
         var viewport = Viewport.home
+        var started = Date()
         if let (meta, s) = try? SessionArchive.load(from: dir) {
             strokes = s
             bg = meta.background ?? Self.paper
             viewport = meta.viewport
+            started = meta.startedAt
         }
         c.storage.journalDir = dir
         c.storage.enterJournal(title: page.title.isEmpty ? "Journal \(target)" : page.title)
-        c.startSession(id: "journal-\(target)", strokes: strokes, background: bg, viewport: viewport)
+        c.startSession(id: "journal-\(target)", strokes: strokes, background: bg, viewport: viewport, startedAt: started)
         knownInk = Set(strokes.map(\.id))
+        refreshAnchors()
         sendState()
     }
 
@@ -178,38 +225,68 @@ final class JournalController: ObservableObject {
 
     func addEntry(_ text: String, kind: JournalEntry.Kind) {
         let t = text.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !t.isEmpty else { return }
+        guard active, !t.isEmpty else { return }
         _ = page.addNote(t, kind: kind, at: Date())
         savePage()
     }
 
     func update(_ id: String, text: String? = nil, done: Bool? = nil) {
+        guard active else { return }
         page.update(id, text: text, done: done, at: Date())
         savePage()
     }
 
     func remove(_ id: String) {
+        guard active else { return }
         page.remove(id)
         savePage()
     }
 
+    /// Edits arrive from text fields, which also commit when the panel hides, i.e.
+    /// after close: without the `active` guard that renamed the restored work
+    /// session to "Journal <day>" (found in real use, 2026-11-01).
     func setTitle(_ t: String) {
-        page.title = String(t.prefix(120))
+        let t = String(t.prefix(120))
+        guard active, t != page.title else { return }
+        page.title = t
         coordinator.storage.sessionTitle = page.title.isEmpty ? "Journal \(day)" : page.title
         savePage()
     }
 
-    /// Small and atomic, so it is written synchronously on every change:
-    /// "Saved" never appears before the entry is on disk.
+    /// Page writes run on a serial background queue (they took ~80 ms on the main
+    /// thread per stroke end in the baseline). Writes are coalesced: the latest
+    /// page wins, older pending ones are skipped. `flushPage()` waits for them
+    /// (switching days, closing, quitting).
+    private let pageQueue = DispatchQueue(label: "inkbridge.journal.save", qos: .utility)
+    private var pendingPage: JournalPage?
+    private let pendingLock = NSLock()
+    @Published private(set) var pageSaving = false
+
     func savePage() {
-        do {
-            try store.savePage(page)
-            pageError = nil
-        } catch {
-            pageError = error.localizedDescription
+        refreshAnchors()
+        pendingLock.withLock { pendingPage = page }
+        pageSaving = true
+        let store = self.store
+        pageQueue.async { [weak self] in
+            guard let self else { return }
+            guard let p = self.pendingLock.withLock({ () -> JournalPage? in defer { self.pendingPage = nil }; return self.pendingPage }) else { return }
+            var failure: String?
+            do { try store.savePage(p) } catch { failure = error.localizedDescription }
+            DispatchQueue.main.async {
+                self.pageError = failure
+                self.pageSaving = self.pendingLock.withLock { self.pendingPage != nil }
+            }
         }
         UserDefaults.standard.set(day, forKey: "lastJournalDay")
         sendState()
+    }
+
+    /// Blocks until queued page writes are on disk.
+    func flushPage() {
+        pageQueue.sync {}
+        if let p = pendingLock.withLock({ () -> JournalPage? in defer { pendingPage = nil }; return pendingPage }) {
+            try? store.savePage(p)
+        }
     }
 
     // MARK: Location
@@ -273,7 +350,7 @@ final class JournalController: ObservableObject {
         revision += 1
         guard let peer = coordinator.activePeer else { return }
         coordinator.server.send(.journalState(active: active, day: day, today: isToday, title: page.title,
-                                              entries: page.entries, revision: revision), to: peer.id)
+                                              entries: page.entries, revision: revision, hidden: hidden), to: peer.id)
     }
 
     func handle(action: String, name: String?) {
@@ -286,24 +363,79 @@ final class JournalController: ObservableObject {
         case "day": if let name, JournalCalendar.isValid(name) { active ? switchDay(to: name) : open(day: name) }
         case "add_note": if active, let name { addEntry(name, kind: .note) }
         case "add_task": if active, let name { addEntry(name, kind: .task) }
+        case "hide": hide()
+        case "show": show()
         default: break
         }
         sendState()
     }
 
+    // MARK: Handwriting previews
+
+    /// Thumbnails by entry, keyed so an entry that gained or lost strokes is re-rendered.
+    private var thumbCache: [String: (key: String, image: NSImage)] = [:]
+
+    func thumbnail(for e: JournalEntry, dark: Bool) -> NSImage? {
+        let key = "\(e.strokeIDs.count)-\(e.strokeIDs.last ?? "")-\(dark)"
+        if let hit = thumbCache[e.id], hit.key == key { return hit.image }
+        let ids = Set(e.strokeIDs)
+        let strokes = coordinator.store.strokes.filter { ids.contains($0.id) }
+        guard let img = Self.renderThumbnail(strokes, dark: dark) else { return nil }
+        thumbCache[e.id] = (key, img)
+        return img
+    }
+
+    static func renderThumbnail(_ strokes: [Stroke], dark: Bool) -> NSImage? {
+        // As wide as the panel allows, as tall as the ink's shape needs (24–96 pt).
+        var b = CGRect.null
+        for s in strokes { let r = s.bounds; b = b.union(CGRect(x: r.minX, y: r.minY, width: r.maxX - r.minX, height: r.maxY - r.minY)) }
+        guard !b.isNull else { return nil }
+        let size = CGSize(width: 220, height: min(96, max(24, 220 * (b.height + 16) / max(b.width + 16, 1))))
+        // Dark ink disappears on a dark panel: draw it light there.
+        guard let cg = InkThumbnail.render(strokes, size: size, color: dark ? RGBA(0.92, 0.92, 0.92) : nil) else { return nil }
+        return NSImage(cgImage: cg, size: size)
+    }
+
+    /// Pans and zooms the page to an entry's handwriting.
+    func reveal(_ e: JournalEntry) {
+        guard active else { return }
+        let ids = Set(e.strokeIDs)
+        var r = CGRect.null
+        for s in coordinator.store.strokes where ids.contains(s.id) {
+            let b = s.bounds
+            r = r.union(CGRect(x: b.minX, y: b.minY, width: b.maxX - b.minX, height: b.maxY - b.minY))
+        }
+        guard !r.isNull else { return }
+        if hidden { show() }
+        // Fit the ink, but never closer than 150% (a single word would fill the screen), centred.
+        let surface = coordinator.ingestor.surface
+        let z = min(Viewport.fitting(r.insetBy(dx: -120, dy: -120), in: surface).zoom, 1.5)
+        coordinator.setViewport(Viewport(x: r.midX - surface.width / z / 2, y: r.midY - surface.height / z / 2, zoom: z))
+    }
+
     // MARK: Canvas timestamps
 
     /// "09:15" next to each handwriting session (when times are shown).
-    func drawTimes(_ ctx: CGContext, _ mapper: CoordinateMapper) {
-        guard active, showTimes else { return }
+    private static let timeFormat: DateFormatter = {
         let f = DateFormatter()
         f.dateFormat = "HH:mm"
-        let byID = Dictionary(coordinator.store.strokes.map { ($0.id, $0) }, uniquingKeysWith: { a, _ in a })
-        for e in page.entries where e.kind == .ink {
-            let pts = e.strokeIDs.compactMap { byID[$0] }.flatMap(\.points)
-            guard let minX = pts.map(\.x).min(), let minY = pts.map(\.y).min() else { continue }
-            let p = mapper.map(x: minX, y: minY)
-            DiagramRenderer.text(f.string(from: e.createdAt), at: CGPoint(x: p.x - 26, y: p.y - 18), size: 11, bold: false,
+        return f
+    }()
+
+    /// Label positions, recomputed only when the page or the ink changes (not per frame).
+    private var anchors: [(date: Date, point: CGPoint)] = []
+
+    private func refreshAnchors() {
+        anchors = page.inkAnchors(coordinator.store.strokes)
+    }
+
+    func drawTimes(_ ctx: CGContext, _ mapper: CoordinateMapper, dirty: CGRect) {
+        guard active, showTimes else { return }
+        for a in anchors {
+            let p = mapper.map(x: Double(a.point.x), y: Double(a.point.y))
+            let r = CGRect(x: p.x - 56, y: p.y - 20, width: 60, height: 18)
+            guard r.intersects(dirty) else { continue }
+            DiagramRenderer.text(Self.timeFormat.string(from: a.date), at: CGPoint(x: p.x - 26, y: p.y - 18), size: 11, bold: false,
                                  color: CGColor(gray: 0.45, alpha: 1), maxWidth: 60, ctx)
         }
     }

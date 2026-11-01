@@ -20,6 +20,13 @@ final class StorageController: ObservableObject {
     private var saving = false
     private var saveAgain = false
     private var savedVersion = -1
+    /// What the last successful save put on disk; lets the next save append (see `IncrementalSave`).
+    private var persisted: IncrementalSave.Persisted?
+    /// Saves by kind, for diagnostics ("Projects & Storage" and the self-check).
+    private(set) var fullSaves = 0, appendSaves = 0
+
+    /// The open document was replaced: the next save is a full write.
+    func documentReplaced() { persisted = nil }
     private var revision: UInt64 = 0
     private static let configKey = "storageConfig"
     static let journalMarker = "__journal__"
@@ -123,6 +130,7 @@ final class StorageController: ObservableObject {
         setStatus(.saving)
         let strokes = coordinator.store.strokes
         let diagram = coordinator.store.diagram
+        let background = coordinator.store.background
         var meta = coordinator.makeMetadata()
         meta.title = sessionTitle
         let dir = sessionDir
@@ -130,10 +138,15 @@ final class StorageController: ObservableObject {
         let sessionID = coordinator.sessionID
         let isJournal = journalDir != nil
         let journalDay = journalDir?.lastPathComponent ?? ""
+        let plan = IncrementalSave.plan(strokes: strokes, background: background, diagram: diagram, dir: dir, persisted: persisted)
+        let logCount = persisted?.logCount ?? 0
         ioQueue.async { [weak self] in
             let result: Result<Void, StorageError>
             do {
-                try SessionArchive.writeStrokes(strokes, metadata: meta, diagram: diagram, to: dir)
+                switch plan {
+                case .append(let new): try SessionArchive.appendStrokes(new, metadata: meta, to: dir)
+                case .full, .none: try SessionArchive.writeStrokes(strokes, metadata: meta, diagram: diagram, to: dir)
+                }
                 result = .success(())
             } catch {
                 result = .failure(StorageError.from(error, path: dir.path))
@@ -144,11 +157,20 @@ final class StorageController: ObservableObject {
                 switch result {
                 case .success:
                     self.savedVersion = version
+                    if case .append(let new) = plan {
+                        self.appendSaves += 1
+                        self.persisted?.ids += new.map(\.id)
+                        self.persisted?.logCount = logCount + new.count
+                    } else {
+                        self.fullSaves += 1
+                        self.persisted = .init(dir: dir, ids: strokes.map(\.id), background: background, diagram: diagram, logCount: 0)
+                    }
                     // Crash recovery reopens what was being written: a journal day or a project session.
                     UserDefaults.standard.set(isJournal ? Self.journalMarker : project, forKey: "lastSessionProject")
                     UserDefaults.standard.set(isJournal ? journalDay : sessionID, forKey: "lastSessionID")
                     self.setStatus(self.coordinator.store.documentVersion == version ? .saved(Date()) : .unsaved)
                 case .failure(let e):
+                    self.persisted = nil  // unknown state on disk: next save is a full write
                     self.setStatus(.failed(e.localizedDescription))
                 }
                 if self.saveAgain { self.saveAgain = false; self.save() }
@@ -167,8 +189,13 @@ final class StorageController: ObservableObject {
         if isPristine { return }
         var meta = coordinator.makeMetadata()
         meta.title = sessionTitle
+        // An async save may still be writing this folder: let it land first.
+        ioQueue.sync {}
+        let store = coordinator.store
         do {
-            try SessionArchive.writeStrokes(coordinator.store.strokes, metadata: meta, diagram: coordinator.store.diagram, to: sessionDir)
+            try SessionArchive.writeStrokes(store.strokes, metadata: meta, diagram: store.diagram, to: sessionDir)
+            persisted = .init(dir: sessionDir, ids: store.strokes.map(\.id), background: store.background, diagram: store.diagram, logCount: 0)
+            fullSaves += 1
             savedVersion = coordinator.store.documentVersion
             setStatus(.saved(Date()))
         } catch {
@@ -222,7 +249,7 @@ final class StorageController: ObservableObject {
         do { (meta, strokes) = try SessionArchive.load(from: dir) } catch { throw StorageError.from(error, path: dir.path) }
         config.activeProject = project
         coordinator.startSession(id: id, strokes: strokes, background: meta.background ?? .overlay, viewport: meta.viewport,
-                                 diagram: SessionArchive.loadDiagram(from: dir))
+                                 diagram: SessionArchive.loadDiagram(from: dir), startedAt: meta.startedAt)
         sessionTitle = meta.title
         savedVersion = coordinator.store.documentVersion
         setStatus(.saved(meta.savedAt))
