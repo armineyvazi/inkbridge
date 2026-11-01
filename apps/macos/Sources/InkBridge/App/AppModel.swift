@@ -37,13 +37,17 @@ final class AppModel: ObservableObject {
     }
 
     // Drawing tools
-    @Published var tool: Tool = .pen
+    // Tool and sizes are preferences (saved, shared with the tablet through `tool.state`),
+    // never document data: a stroke copies its width when it begins. Sizes are canvas px,
+    // the document's unit, so they mean the same thickness at any zoom (see ToolSettings).
+    @Published var tool: Tool { didSet { if tool != oldValue { defaults.set(tool.rawValue, forKey: "tool") } } }
     @Published var penColor: RGBA = .red
-    @Published var penWidth: Double = 3
+    @Published var penWidth: Double { didSet { defaults.set(penWidth, forKey: "sizePen") } }
     @Published var highlighterColor: RGBA = .yellow
-    @Published var highlighterWidth: Double = 22
+    @Published var highlighterWidth: Double { didSet { defaults.set(highlighterWidth, forKey: "sizeHighlighter") } }
     @Published var highlighterOpacity: Double = 0.35
-    @Published var eraserRadius: Double = 0.015
+    /// Eraser radius in canvas px.
+    @Published var eraserSize: Double { didSet { defaults.set(eraserSize, forKey: "sizeEraser") } }
     @Published var overlayVisible = true
 
     // Runtime status
@@ -116,6 +120,11 @@ final class AppModel: ObservableObject {
         toolbarSize = ToolbarSize(rawValue: defaults.string(forKey: "toolbarSize") ?? "") ?? .expanded
         toolbarDock = ToolbarDock(rawValue: defaults.string(forKey: "toolbarDock") ?? "") ?? .bottom
         toolbarVisible = defaults.object(forKey: "toolbarVisible") as? Bool ?? true
+        let d = ToolSettings()
+        tool = Tool(rawValue: defaults.string(forKey: "tool") ?? "") ?? d.tool
+        penWidth = ToolSize.pen.clamp(defaults.object(forKey: "sizePen") as? Double ?? d.pen)
+        highlighterWidth = ToolSize.highlighter.clamp(defaults.object(forKey: "sizeHighlighter") as? Double ?? d.highlighter)
+        eraserSize = ToolSize.eraser.clamp(defaults.object(forKey: "sizeEraser") as? Double ?? d.eraser)
         // v2 kept a permanent code; v3 issues short-lived ones on demand.
         defaults.removeObject(forKey: "pairingCode")
     }
@@ -123,10 +132,20 @@ final class AppModel: ObservableObject {
     static let palette: [RGBA] = [.red, .blue, .green, .black, .white]
     static let highlighterPalette: [RGBA] = [.yellow, RGBA(0.45, 0.95, 0.35), RGBA(1, 0.45, 0.75), RGBA(0.35, 0.8, 1)]
 
+    /// The selected tool and sizes, as shared with the tablet.
+    var toolSettings: ToolSettings {
+        get { ToolSettings(tool: tool, pen: penWidth, highlighter: highlighterWidth, eraser: eraserSize) }
+        set {
+            if tool != newValue.tool { tool = newValue.tool }
+            if penWidth != newValue.pen { penWidth = newValue.pen }
+            if highlighterWidth != newValue.highlighter { highlighterWidth = newValue.highlighter }
+            if eraserSize != newValue.eraser { eraserSize = newValue.eraser }
+        }
+    }
+
     /// The tool and style for a new stroke, given the device's physical tool.
     /// The device eraser always erases; otherwise the toolbar selection wins.
-    /// Widths here are display points at the current zoom; the coordinator
-    /// converts them to canvas px.
+    /// Widths are canvas px (page units), stored on the stroke as they are.
     func resolve(_ deviceTool: Tool, devicePressure: Bool) -> (Tool, StrokeStyle) {
         let tool = deviceTool == .eraser ? .eraser : self.tool
         switch tool {
@@ -137,7 +156,7 @@ final class AppModel: ObservableObject {
             c.a = highlighterOpacity
             return (tool, StrokeStyle(color: c, width: highlighterWidth, pressureSensitive: false))
         case .laser:
-            return (tool, StrokeStyle(color: RGBA(1, 0.15, 0.1), width: 5, pressureSensitive: false))
+            return (tool, StrokeStyle(color: RGBA(1, 0.15, 0.1), width: 8, pressureSensitive: false))
         case .eraser:
             return (tool, StrokeStyle(color: .white, width: 0, pressureSensitive: false))
         }

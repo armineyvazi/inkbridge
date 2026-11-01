@@ -48,7 +48,7 @@ simulated pen.
 | | |
 |---|---|
 | Canvas | infinite and shared: zoom (pinch, ±) and pan (finger) on the tablet, Fit all / Home on both; ink persists on the tablet |
-| Tools | pen (pressure), highlighter, stroke eraser, laser pointer, colors, widths |
+| Tools | pen (pressure), highlighter, stroke eraser, laser pointer, colors. **Pen size on the tablet:** tool buttons, − / + and a size panel (live preview, slider, XS–XL presets); each tool keeps its own size; sizes are page units (same thickness at any zoom) and shared with the Mac toolbar |
 | Editing | undo/redo of whole strokes; clear is undoable |
 | Overlay | transparent, click-through, above full-screen apps, any display |
 | Toolbar | expanded / compact / minimal; bottom, top, left, right or anywhere; hide, then reopen from the menu-bar icon |
@@ -58,7 +58,7 @@ simulated pen.
 | Sessions | projects & storage window (⌃⌥J); incremental autosave (appends new strokes, compacts later), crash recovery; **Save…** to any folder: full page (PNG/JPEG), transparent ink layer (PNG + SVG), editable strokes, background, mapping metadata |
 | Connection | Wi-Fi first: Bonjour discovery, TLS with a pinned certificate, one-time pairing code (or QR link), device tokens; reconnect 163 ms after Wi-Fi returns; strokes lost on a dead link are re-sent. Optional USB (adb reverse) |
 | Tablet app | E-ink-first UI: dashboard, Connect to Mac, full-screen canvas with a slim floating bar, Settings, Diagnostics |
-| Diagnostics | live RTT and pen-to-Mac latency; exportable report; on-tablet stylus readout |
+| Diagnostics | live RTT and pen-to-Mac latency; exportable report; on-tablet stylus readout; per-stage writing latency (input, processing, handoff, draw, panel wait, post), CPU, heap and dropped samples (`scripts/latency-run.sh`) |
 
 ## Repository
 

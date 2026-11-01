@@ -350,6 +350,45 @@ class UiTest {
         assertEquals(View.GONE, card.visibility, "offline: the Mac's journal can't be continued, so no card")
     }
 
+    /**
+     * The toolbar's − / + change only the selected tool; switching tools restores each
+     * tool's own size; the next stroke on the tablet uses it; earlier strokes keep theirs;
+     * the choice survives a restart (saved preferences).
+     */
+    @Test
+    fun penSizeControlsArePerToolAndApplyToTheNextStrokeOnly() {
+        val a = Robolectric.buildActivity(CanvasActivity::class.java).setup().get()
+        val m = app.connection
+        m.selectTool(Tool.PEN)
+        m.setToolSize(Tool.PEN, 2.0)
+        val root = a.window.decorView
+        fun press(label: String) { root.findViews<View>().first { it.contentDescription == label && it.hasOnClickListeners() }.performClick(); idle() }
+        press("Highlighter")
+        assertEquals(Tool.HIGHLIGHTER, m.tools.value.tool)
+        press("Thicker")
+        assertEquals(40.0, m.tools.value.highlighter, "one step up from 36")
+        press("Pen")
+        assertEquals(2.0, m.tools.value.pen, "the pen kept its size")
+        val canvas = root.findViews<CanvasView>().single()
+        fun stroke(x: Float) {
+            val down = android.view.MotionEvent.obtain(0, 0, android.view.MotionEvent.ACTION_DOWN, x, 300f, 0)
+            val props = arrayOf(android.view.MotionEvent.PointerProperties().apply { id = 0; toolType = android.view.MotionEvent.TOOL_TYPE_STYLUS })
+            val coords = arrayOf(android.view.MotionEvent.PointerCoords().apply { this.x = x; y = 300f; pressure = 1f })
+            for (action in listOf(android.view.MotionEvent.ACTION_DOWN, android.view.MotionEvent.ACTION_UP)) {
+                canvas.dispatchTouchEvent(android.view.MotionEvent.obtain(0, 0, action, 1, props, coords, 0, 0, 1f, 1f, 0, 0, 0x1002, 0))
+            }
+            down.recycle()
+        }
+        stroke(200f)
+        press("Thicker")
+        assertEquals(2.5, m.tools.value.pen)
+        stroke(400f)
+        val widths = m.document.read { all -> all.sortedBy { it.points.first().x }.map { it.style.width } }
+        assertEquals(listOf(2.0, 2.5), widths, "each stroke keeps the size it was drawn with")
+        val saved = AppSettings.load(ApplicationProvider.getApplicationContext()).tools
+        assertEquals(2.5, saved.pen); assertEquals(40.0, saved.highlighter); assertEquals(Tool.PEN, saved.tool)
+    }
+
     private fun View.allViews(): List<View> =
         listOf(this) + ((this as? ViewGroup)?.let { g -> (0 until g.childCount).flatMap { g.getChildAt(it).allViews() } } ?: emptyList())
 

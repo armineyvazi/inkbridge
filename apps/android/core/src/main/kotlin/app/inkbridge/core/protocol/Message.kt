@@ -127,6 +127,18 @@ sealed interface Payload {
     data class JournalRequest(val action: String, val name: String? = null) : Payload {
         override val type get() = "journal.request"
     }
+    /**
+     * Host → device: the selected tool and every tool's size (canvas px), sent on connect
+     * and on every change. [ack] is the last `tool.request` seq the Mac applied from this
+     * device stream, so the tablet can skip replies to edits it has already superseded.
+     */
+    data class ToolState(val settings: app.inkbridge.core.canvas.ToolSettings, val revision: Long, val ack: Long) : Payload {
+        override val type get() = "tool.state"
+    }
+    /** Device → host: select [tool] and/or set some tools' [sizes]; the Mac answers with `tool.state`. */
+    data class ToolRequest(val seq: Long, val tool: Tool? = null, val sizes: Map<Tool, Double> = emptyMap()) : Payload {
+        override val type get() = "tool.request"
+    }
     /** Host → device: what the Mac is saving to and how it is going (paths are display strings). */
     data class Storage(val state: StorageState) : Payload {
         override val type get() = "storage.state"

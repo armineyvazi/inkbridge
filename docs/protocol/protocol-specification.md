@@ -58,6 +58,8 @@ Direction: **D→H** means device to host, **H→D** host to device.
 | `stroke.end` | both | `stroke_id` | Stroke complete. |
 | `stroke.style` | H→D | `stroke_id`, `tool`, `style` | How the host resolved a device stroke (toolbar tool, colour, width). Sent once at `stroke.begin`. |
 | `canvas.viewport` | both | `x`, `y`, `zoom` (0.02 … 50) | The view moved. The device sends it after the handshake, on gesture end (throttled to ≥ 100 ms while dragging), and on zoom/Fit/Home; the host sends it for Mac-side Fit all and Home. |
+| `tool.state` | H→D | `tool` (`pen`\|`highlighter`\|`eraser`\|`laser`), `sizes{pen,highlighter,eraser}` (canvas px), `revision`, `ack` | The selected tool and every tool's size. Sent after the handshake and on every change, from either side. `ack` is the last `tool.request.seq` the host applied **from this device stream**. |
+| `tool.request` | D→H | `seq` (≥ 0), optional `tool`, optional `sizes{…}` (any subset; each 0 < v ≤ 1000) | Tablet changed the tool and/or a size. The host clamps to the tool's range, applies in arrival order, and answers with `tool.state`. Kept in the device's resend log, so it reaches the host before the strokes drawn after it. |
 | `canvas.command` | D→H | `command`: `undo` \| `redo` \| `clear` | Tablet buttons. The host applies the command to its document; the result comes back as doc messages. |
 | `doc.reset` | H→D | — | Drop every confirmed stroke; a full resync follows. Sent once per connection. |
 | `doc.remove` | H→D | `stroke_ids` (1 … 256) | These strokes left the document (erase, undo, clear, or a device eraser/laser stroke the host did not keep). |
@@ -105,8 +107,32 @@ overhead with no latency benefit, since the samples become available together an
 The device reports its **physical** tool: `pen`, or `eraser` when Android reports
 `TOOL_TYPE_ERASER` or the primary stylus button is held. The host maps `pen` to the
 tool selected on its toolbar (pen, highlighter or laser). A device `eraser` always
-erases. `highlighter` and `laser` are valid on the wire for future device-side tool
-selection.
+erases. Since v0.4 the tablet can also *select* the tool (`tool.request`); the host's
+toolbar and the tablet stay in step through `tool.state`, and the host still resolves
+every stroke (`stroke.style`).
+
+### Tool settings (v0.4)
+
+Tool sizes are **preferences**, not document data. A stroke copies its width when it
+begins; later size changes never restyle it. Units are canvas px, the document unit, so a
+size means the same thickness on the page at any zoom and on any Mac display. Limits,
+defaults and presets are in `protocol/fixtures/tool-sizes.json`; both test suites assert
+their code matches it.
+
+```json
+{"type":"tool.state","tool":"highlighter","sizes":{"pen":4.5,"highlighter":36,"eraser":28},"revision":7,"ack":3}
+{"type":"tool.request","seq":4,"tool":"pen","sizes":{"pen":5}}
+```
+
+**Source of truth and conflicts.** The Mac owns the settings (UserDefaults) and applies
+requests in arrival order: the most recent change wins, wherever it was made. Requests
+carry only what changed, so a tablet pen change never overwrites a Mac highlighter change.
+The tablet applies its own edits at once (optimistic) and ignores a `tool.state` whose
+`ack` is lower than its latest `seq`: that state answers an edit it has already
+superseded (a slider still moving). The reply to its latest edit carries the merged
+result. Acks are kept per `stream_id`, so a restarted tablet app starts again at 0.
+Offline edits wait in the outbox, are replayed on reconnect, and win over the Mac's
+state at that moment.
 
 ## 4. Handshake
 

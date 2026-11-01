@@ -41,6 +41,24 @@ public enum ProtocolError: Error, Equatable, CustomStringConvertible {
 /// cannot hand the drawing engine NaN coordinates or unbounded strings.
 public enum MessageCodec {
     public static let maxStringLength = 128
+    /// `{"pen": 4, …}` on the wire.
+    static func sizesField(_ m: [Tool: Double]) -> [String: Double] {
+        Dictionary(uniqueKeysWithValues: m.map { ($0.key.rawValue, $0.value) })
+    }
+
+    /// Only sizable tools, each a finite width in (0, 1000] canvas px. Receivers clamp to the tool's range.
+    static func toolSizes(_ o: [String: Any]) throws -> [Tool: Double] {
+        var out: [Tool: Double] = [:]
+        let f = Fields(o)
+        for k in o.keys {
+            guard let t = Tool(rawValue: k), t != .laser, let v = f.double(k), v > 0, v <= 1000 else {
+                throw ProtocolError.invalidField("sizes")
+            }
+            out[t] = v
+        }
+        return out
+    }
+
     /// Every `journal.request` action the Mac understands.
     public static let journalActions: Set<String> = ["open", "close", "today", "prev", "next", "day", "add_note", "add_task", "hide", "show"]
     public static let maxPointsPerMessage = 256
@@ -123,6 +141,13 @@ public enum MessageCodec {
         case let .journalRequest(action, name):
             var f: [String: Any] = ["action": action]
             if let name { f["name"] = name }
+            return f
+        case let .toolState(t, revision, ack):
+            return ["tool": t.tool.rawValue, "sizes": Self.sizesField(t.sizes), "revision": revision, "ack": ack]
+        case let .toolRequest(seq, tool, sizes):
+            var f: [String: Any] = ["seq": seq]
+            if let tool { f["tool"] = tool.rawValue }
+            if !sizes.isEmpty { f["sizes"] = Self.sizesField(sizes) }
             return f
         case let .storageState(st):
             var f: [String: Any] = ["project": st.project, "session": st.session, "location": st.location, "status": st.status,
@@ -250,6 +275,20 @@ public enum MessageCodec {
                 throw ProtocolError.invalidField("action")
             }
             return .journalRequest(action: action, name: try f.optionalString("name"))
+        case "tool.state":
+            guard let t = Tool(rawValue: try f.string("tool")) else { throw ProtocolError.invalidField("tool") }
+            let sz = try Self.toolSizes(try f.object("sizes"))
+            guard let pen = sz[.pen], let hl = sz[.highlighter], let er = sz[.eraser] else { throw ProtocolError.missingField("sizes") }
+            return .toolState(ToolSettings(tool: t, pen: pen, highlighter: hl, eraser: er),
+                              revision: try f.uint64("revision"), ack: try f.uint64("ack"))
+        case "tool.request":
+            var tool: Tool?
+            if let raw = try f.optionalString("tool") {
+                guard let t = Tool(rawValue: raw) else { throw ProtocolError.invalidField("tool") }
+                tool = t
+            }
+            return .toolRequest(seq: try f.uint64("seq"), tool: tool,
+                                sizes: try f.optionalObject("sizes").map(Self.toolSizes) ?? [:])
         case "storage.state":
             let status = try f.string("status")
             guard ["empty", "saved", "saving", "unsaved", "failed"].contains(status) else { throw ProtocolError.invalidField("status") }

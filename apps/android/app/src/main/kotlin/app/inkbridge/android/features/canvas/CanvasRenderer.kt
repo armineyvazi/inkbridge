@@ -29,8 +29,8 @@ import java.util.concurrent.atomic.AtomicBoolean
  *   re-rendering every stroke on every gesture frame.
  *
  * The UI thread only posts requests, so pen input is never blocked by drawing.
- * Ink is monochrome: colours that read well on a Mac (yellow highlighter)
- * would vanish on e-ink, so pens draw black and highlighters grey.
+ * How a stroke looks (monochrome, highlighter blend, widths) is [InkPainter],
+ * shared with the pen-size preview.
  */
 class CanvasRenderer(private val document: CanvasDocument) {
     companion object {
@@ -51,7 +51,13 @@ class CanvasRenderer(private val document: CanvasDocument) {
         val drawTime = app.inkbridge.core.input.LatencyRecorder()
         val lockTime = app.inkbridge.core.input.LatencyRecorder()
         val postTime = app.inkbridge.core.input.LatencyRecorder()
+        /** UI thread → render thread: first new sample in the document → frame starts drawing it. */
+        val handoffTime = app.inkbridge.core.input.LatencyRecorder()
+        private val frames = java.util.concurrent.atomic.AtomicLong()
     }
+
+    /** When the oldest not-yet-drawn sample entered the document (0: nothing waiting). */
+    private val pendingSince = java.util.concurrent.atomic.AtomicLong(0)
 
     private val thread = HandlerThread("ink-render").apply { start() }
     private val handler = Handler(thread.looper)
@@ -64,11 +70,7 @@ class CanvasRenderer(private val document: CanvasDocument) {
     private val drawnUpTo = HashMap<String, Int>()
     /** Whether the last full render was on dark paper (ink is drawn light). */
     private var dark = false
-    private val paint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        style = Paint.Style.STROKE
-        strokeCap = Paint.Cap.ROUND
-        strokeJoin = Paint.Join.ROUND
-    }
+    private val paint = InkPainter.newPaint()
 
     // Cross-thread requests.
     @Volatile var viewport: Viewport = Viewport.HOME
@@ -89,7 +91,10 @@ class CanvasRenderer(private val document: CanvasDocument) {
     init {
         document.onChange = { change ->
             when (change) {
-                is CanvasDocument.Change.Grew -> synchronized(pendingIds) { pendingIds += change.id }
+                is CanvasDocument.Change.Grew -> {
+                    synchronized(pendingIds) { pendingIds += change.id }
+                    pendingSince.compareAndSet(0, System.nanoTime())
+                }
                 CanvasDocument.Change.Full -> fullRequested.set(true)
             }
             schedule()
@@ -175,11 +180,18 @@ class CanvasRenderer(private val document: CanvasDocument) {
         post(h, null)
     }
 
-    /** Every 200 frames: the latency summary to logcat (`adb logcat -s InkBridge`). */
+    /**
+     * Every 200 frames: the per-stage summary to logcat (`adb logcat -s InkBridge`).
+     * Counted separately: the recorders stop growing at their capacity, so `size % 200`
+     * became true on every frame after 2000 frames and logged from the render thread.
+     */
     private fun logPerf() {
-        if (frameTime.size % 200 != 0) return
+        if (frames.incrementAndGet() % 200 != 0L) return
+        val s = app.inkbridge.android.input.AndroidMotionEventSource
         android.util.Log.i("InkBridge", "perf ink(sample→posted) ${inkLatency.summary()} · frame ${frameTime.summary()}" +
-            " · draw ${drawTime.summary()} · lock ${lockTime.summary()} · copy+post ${postTime.summary()}")
+            " · input ${s.deliveryTime.summary()} · process ${s.processTime.summary()} · handoff ${handoffTime.summary()}" +
+            " · draw ${drawTime.summary()} · lock ${lockTime.summary()} · copy+post ${postTime.summary()}" +
+            " · ${PerfProbe.snapshot()}")
     }
 
     /** Ink drawn into the cache but outside the last locked region; posted next frame. */
@@ -215,6 +227,8 @@ class CanvasRenderer(private val document: CanvasDocument) {
         val start = System.nanoTime()
         val v = viewport
         val dirty = Rect(carry).also { carry.setEmpty() }
+        val since = pendingSince.getAndSet(0)
+        if (since != 0L) handoffTime.add((start - since) / 1e6)
         var oldest = drainPending(c, v, dirty)
         if (dirty.isEmpty) return
         drawTime.add((System.nanoTime() - start) / 1e6)
@@ -234,6 +248,8 @@ class CanvasRenderer(private val document: CanvasDocument) {
         try {
             val late = Rect()
             oldest = minOf(oldest, drainPending(c, v, late))
+            // Those samples made this frame; don't count them as waiting for the next one.
+            if (!late.isEmpty) pendingSince.set(0)
             if (!late.isEmpty) {
                 if (locked.contains(late)) dirty.union(late) else carry.union(late)
             }
@@ -414,43 +430,7 @@ class CanvasRenderer(private val document: CanvasDocument) {
         }
     }
 
-    /** Draws a polyline with pressure width; returns the touched rect in view px. */
-    private fun drawSegments(c: Canvas, pts: List<InkPoint>, style: WireStyle, tool: Tool, v: Viewport, from: Int): Rect {
-        val r = Rect()
-        if (pts.isEmpty()) return r
-        val base = (style.width * v.zoom).toFloat()
-        // Monochrome ink that contrasts with the paper: white on a dark studio surface.
-        when (tool) {
-            Tool.PEN -> paint.color = if (dark) Color.WHITE else Color.BLACK
-            Tool.HIGHLIGHTER -> paint.color = if (dark) Color.argb(0x80, 0xB0, 0xB0, 0xB0) else Color.argb(0x70, 0x60, 0x60, 0x60)
-            Tool.ERASER -> paint.color = Color.argb(0x90, 0xA0, 0xA0, 0xA0)
-            Tool.LASER -> paint.color = if (dark) Color.LTGRAY else Color.DKGRAY
-        }
-        val pressureSensitive = tool == Tool.PEN
-        var px = v.toViewX(pts[from].x)
-        var py = v.toViewY(pts[from].y)
-        if (pts.size - from == 1) {
-            paint.strokeWidth = width(base, pts[from].p, pressureSensitive)
-            c.drawPoint(px, py, paint)
-            r.union(Rect((px - base).toInt(), (py - base).toInt(), (px + base).toInt() + 1, (py + base).toInt() + 1))
-            return r
-        }
-        for (i in from + 1 until pts.size) {
-            val x = v.toViewX(pts[i].x)
-            val y = v.toViewY(pts[i].y)
-            val w = if (tool == Tool.ERASER || tool == Tool.LASER) 2f else width(base, (pts[i - 1].p + pts[i].p) / 2, pressureSensitive)
-            paint.strokeWidth = w
-            c.drawLine(px, py, x, y, paint)
-            val pad = w / 2 + 2
-            r.union(Rect((minOf(px, x) - pad).toInt(), (minOf(py, y) - pad).toInt(), (maxOf(px, x) + pad).toInt() + 1, (maxOf(py, y) + pad).toInt() + 1))
-            px = x
-            py = y
-        }
-        return r
-    }
-
-    // Same width rule as the Mac renderer: 30 % of the width at zero pressure.
-    private fun width(base: Float, p: Double, pressureSensitive: Boolean): Float =
-        if (pressureSensitive) maxOf(base * (0.3f + 0.7f * p.toFloat().coerceIn(0f, 1f)), 1f) else maxOf(base, 1f)
+    private fun drawSegments(c: Canvas, pts: List<InkPoint>, style: WireStyle, tool: Tool, v: Viewport, from: Int): Rect =
+        InkPainter.drawSegments(c, paint, if (from == 0) pts else pts.subList(from, pts.size), style, tool, v, dark)
 
 }

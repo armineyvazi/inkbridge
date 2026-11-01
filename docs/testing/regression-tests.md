@@ -20,3 +20,8 @@
 | Every session recorded the app launch time as its start | verified on disk (journal 18:26:08 vs work 18:26:00) |
 | Tablet journal draft lost when new ink arrived | `UiTest.journalSheetShowsPutAwayStateAndKeepsATypedNoteAcrossUpdates` |
 | Journal page save blocked the main thread ~80 ms per stroke | `JournalPerformanceTests.testPersistenceCost` (now 1.3 ms, background) |
+| Tablet ignored the Mac's tool settings forever after a Mac restart (found on hardware, v0.4) | `ToolSettingsTest.macRestartIsAdoptedAfterReconnect`; verified on hardware |
+| Offline tablet size change lost on reconnect | `ToolSettingsTest.unacknowledgedEditIsResentInFullOnReconnect`; verified on hardware (8 → 10 while the Mac was quit) |
+| Same Mac pen setting stored a different width per display/zoom (3 pt → 5.72 px) | `ToolSettingsTests.testChangingSizeDoesNotRestyleExistingStrokes` + unit change (ADR-008) |
+| Perf log fired on every frame after 2 000 frames | separate frame counter in `CanvasRenderer.logPerf` |
+| Notched edges on thick tablet strokes (overlapping caps) — found on hardware | `InkPainter` draws equal-width runs as one Path; verified on hardware screenshots |

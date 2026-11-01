@@ -13,6 +13,10 @@ import app.inkbridge.android.features.canvas.JournalSheet
 import app.inkbridge.core.protocol.JournalItem
 import app.inkbridge.core.protocol.Payload
 import org.junit.Assume.assumeTrue
+import app.inkbridge.core.protocol.Tool
+import app.inkbridge.core.canvas.ToolSettings
+import app.inkbridge.android.features.canvas.PenSheet
+import app.inkbridge.android.features.canvas.PenBar
 import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.Robolectric
@@ -81,6 +85,19 @@ class ScreenshotTest {
             setPadding(160, 160, 160, 160)
             addView(sheet, android.widget.FrameLayout.LayoutParams(-1, -2))
         })
+        // Pen-size panel and the toolbar pen group, for each tool.
+        for (tool in listOf(Tool.PEN, Tool.HIGHLIGHTER, Tool.ERASER)) {
+            val s = ToolSettings(tool = tool, pen = 4.5)
+            val pen = PenSheet(canvas, {}, { _, _, _ -> }, {}).apply { render(s, 1.0) }
+            val bar = PenBar(canvas, {}, {}, {}).apply { render(s, 1.0) }
+            shoot("8-pen-${tool.wire}", android.widget.LinearLayout(canvas).apply {
+                orientation = android.widget.LinearLayout.VERTICAL
+                setBackgroundColor(android.graphics.Color.WHITE)
+                setPadding(160, 120, 160, 160)
+                addView(bar, android.widget.LinearLayout.LayoutParams(-2, -2))
+                addView(pen, android.widget.LinearLayout.LayoutParams(660, -2).apply { topMargin = 24 })
+            })
+        }
     }
 }
 

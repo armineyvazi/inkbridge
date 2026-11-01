@@ -279,13 +279,13 @@ final class InkCoordinator: NSObject {
 
     var activePeer: PeerInfo? { arbiter.activeID.flatMap { peers[$0] } }
 
-    /// Toolbar widths are on-screen points; stored strokes use canvas px, so a
-    /// line looks as thick as selected at the current zoom and scales after.
+    /// Tool sizes are canvas px, the unit strokes are stored in, so they go on the
+    /// stroke unchanged. (Until v0.4 they were Mac screen points divided by the overlay's
+    /// scale, which made the same setting thicker or thinner on the page depending on the
+    /// zoom and on which Mac display showed the overlay.)
     private func resolveInCanvasUnits(_ tool: Tool) -> (Tool, StrokeStyle) {
         let pressure = activePeer?.hello.capabilities.pressure ?? true
-        var (resolved, style) = model.resolve(tool, devicePressure: pressure)
-        style.width /= max(overlayView.mapper.scale, 1e-6)
-        return (resolved, style)
+        return model.resolve(tool, devicePressure: pressure)
     }
 
     // MARK: Overlay
@@ -339,10 +339,46 @@ final class InkCoordinator: NSObject {
         toolbar?.screenChanged(targetScreen)
     }
 
-    /// The eraser size is a fraction of the display height; convert to canvas px.
+    /// The eraser size is its radius in canvas px.
     private func updateEraserRadius() {
-        guard let overlayView else { return }
-        store.eraserRadius = model.eraserRadius * Double(overlayView.mapper.canvas.height) / max(overlayView.mapper.scale, 1e-6)
+        store.eraserRadius = model.eraserSize
+    }
+
+    // MARK: Tool settings (shared with the tablet)
+
+    /// Bumped on every change; the tablet ignores nothing based on it, it is for diagnostics/tests.
+    private(set) var toolRevision: UInt64 = 0
+    /// Last `tool.request` seq applied, per device stream (one per tablet app process).
+    private var toolAcks: [String: UInt64] = [:]
+
+    /// A tablet asked to change the tool or sizes. Applied in arrival order, so the
+    /// latest change wins wherever it came from; the answer goes to every tablet.
+    func applyToolRequest(seq: UInt64, tool: Tool?, sizes: [Tool: Double], from peer: PeerInfo) {
+        toolAcks[peer.hello.streamID] = seq
+        var t = model.toolSettings
+        if let tool { t.tool = tool }
+        for (k, v) in sizes { t.setSize(k, v) }
+        if t != model.toolSettings { model.toolSettings = t }  // the observer broadcasts
+        else { sendToolState(to: peer) }
+    }
+
+    func sendToolState(to peer: PeerInfo) {
+        server.send(.toolState(model.toolSettings, revision: toolRevision, ack: toolAcks[peer.hello.streamID] ?? 0), to: peer.id)
+    }
+
+    private var toolBroadcastPending = false
+
+    /// One `tool.state` per run-loop turn, however many properties changed together.
+    private func toolSettingsChanged() {
+        updateEraserRadius()
+        guard !toolBroadcastPending else { return }
+        toolBroadcastPending = true
+        DispatchQueue.main.async { [weak self] in
+            guard let self else { return }
+            self.toolBroadcastPending = false
+            self.toolRevision += 1
+            for p in self.peers.values { self.sendToolState(to: p) }
+        }
     }
 
     // MARK: Model observation
@@ -357,7 +393,12 @@ final class InkCoordinator: NSObject {
         model.$fit.dropFirst().receive(on: RunLoop.main).sink { [weak self] _ in self?.relayoutOverlay() }.store(in: &bag)
         model.$displayID.dropFirst().receive(on: RunLoop.main).sink { [weak self] _ in self?.relayoutOverlay() }.store(in: &bag)
         model.$followMouse.dropFirst().receive(on: RunLoop.main).sink { [weak self] _ in self?.relayoutOverlay() }.store(in: &bag)
-        model.$eraserRadius.dropFirst().receive(on: RunLoop.main).sink { [weak self] _ in self?.updateEraserRadius() }.store(in: &bag)
+        // Any tool or size change, from the toolbar, a hotkey, the journal or a tablet.
+        // Published fires before the property is set, so read the model on the next turn.
+        Publishers.Merge4(model.$tool.map { _ in () }, model.$penWidth.map { _ in () },
+                          model.$highlighterWidth.map { _ in () }, model.$eraserSize.map { _ in () })
+            .dropFirst(4).receive(on: RunLoop.main)
+            .sink { [weak self] in self?.toolSettingsChanged() }.store(in: &bag)
     }
 
     func refreshEditState() {
@@ -553,6 +594,8 @@ extension InkCoordinator: InkServerDelegate {
             storage.handle(action: action, name: name)
         case let .journalRequest(action, name):
             journal.handle(action: action, name: name)
+        case let .toolRequest(seq, tool, sizes):
+            applyToolRequest(seq: seq, tool: tool, sizes: sizes, from: peer)
         case let .canvasBackground(bg, _):
             // A request from the tablet. The Mac is the single writer: apply it (one undo
             // step), then echo the result with the new revision so both sides converge,
@@ -636,6 +679,7 @@ extension InkCoordinator: InkServerDelegate {
             server.send(.storageState(storage.state()), to: peer.id)
             syncDiagram(force: true)
             journal.sendState()
+            sendToolState(to: peer)
         }
         relayoutOverlay()
     }

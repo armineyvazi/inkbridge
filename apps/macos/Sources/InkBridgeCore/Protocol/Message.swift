@@ -182,6 +182,12 @@ public enum Payload: Equatable, Sendable {
     /// Device → host: "open" | "close" | "today" | "prev" | "next" | "day" (name = yyyy-MM-dd) | "add_note" | "add_task"
     /// | "hide" | "show" (put the open journal away on the Mac / bring it back, without leaving it).
     case journalRequest(action: String, name: String?)
+    /// Host → device: the selected tool and every tool's size (canvas px), on connect and on
+    /// every change. `ack`: the last `tool.request` seq applied from this device stream.
+    case toolState(ToolSettings, revision: UInt64, ack: UInt64)
+    /// Device → host: select `tool` and/or set some tools' `sizes`. The Mac clamps, applies
+    /// in arrival order and answers with `tool.state`.
+    case toolRequest(seq: UInt64, tool: Tool?, sizes: [Tool: Double])
     /// Host → device: project, session, save status (sent on change and on connect).
     case storageState(StorageState)
     /// Device → host: "save_now" | "new_session" | "switch_project" | "create_project" | "use_location".
@@ -221,6 +227,8 @@ public enum Payload: Equatable, Sendable {
         case .storageState: return "storage.state"
         case .journalState: return "journal.state"
         case .journalRequest: return "journal.request"
+        case .toolState: return "tool.state"
+        case .toolRequest: return "tool.request"
         case .storageRequest: return "storage.request"
         case .canvasCommand: return "canvas.command"
         case .docReset: return "doc.reset"

@@ -224,6 +224,11 @@ class InkBridgeClient(
         if (outbox.trySend(Payload.JournalRequest(action, name)).isFailure) droppedEvents.incrementAndGet()
     }
 
+    /** Tool selection / size change. Queued while offline and sent, in order, on reconnect. */
+    fun submitToolRequest(r: Payload.ToolRequest) {
+        if (outbox.trySend(r).isFailure) droppedEvents.incrementAndGet()
+    }
+
     /** Asks the Mac to act on storage (save_now, new_session, switch_project, create_project, use_location). */
     fun submitStorageRequest(action: String, name: String? = null) {
         if (outbox.trySend(Payload.StorageRequest(action, name)).isFailure) droppedEvents.incrementAndGet()
@@ -432,7 +437,8 @@ class InkBridgeClient(
                 onHostPayload?.invoke(p)
             }
             is Payload.StrokeBegin, is Payload.StrokePoints, is Payload.StrokeEnd, is Payload.StrokeStyle,
-            is Payload.DocReset, is Payload.DocRemove, is Payload.Background, is Payload.Storage, is Payload.Diagram, is Payload.Journal -> onHostPayload?.invoke(p)
+            is Payload.DocReset, is Payload.DocRemove, is Payload.Background, is Payload.Storage, is Payload.Diagram, is Payload.Journal,
+            is Payload.ToolState -> onHostPayload?.invoke(p)
             else -> Unit
         }
     }
@@ -460,7 +466,9 @@ class InkBridgeClient(
     }
 
     private fun isDocument(p: Payload) = p is Payload.StrokeBegin || p is Payload.StrokePoints ||
-        p is Payload.StrokeEnd || p is Payload.StrokeCancel || p is Payload.Command || p is Payload.Background
+        p is Payload.StrokeEnd || p is Payload.StrokeCancel || p is Payload.Command || p is Payload.Background ||
+        // A size change must reach the Mac before the strokes drawn after it.
+        p is Payload.ToolRequest
 
     private companion object {
         /** About a minute of continuous drawing at the BOOX's sample rate. */

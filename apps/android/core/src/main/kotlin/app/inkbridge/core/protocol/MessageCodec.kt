@@ -125,6 +125,16 @@ object MessageCodec {
             put("action", JsonPrimitive(p.action))
             p.name?.let { put("name", JsonPrimitive(it)) }
         }
+        is Payload.ToolState -> mapOf(
+            "tool" to JsonPrimitive(p.settings.tool.wire),
+            "sizes" to sizes(p.settings.sizes),
+            "revision" to JsonPrimitive(p.revision), "ack" to JsonPrimitive(p.ack),
+        )
+        is Payload.ToolRequest -> buildMap {
+            put("seq", JsonPrimitive(p.seq))
+            p.tool?.let { put("tool", JsonPrimitive(it.wire)) }
+            if (p.sizes.isNotEmpty()) put("sizes", sizes(p.sizes))
+        }
         is Payload.Storage -> buildMap {
             val st = p.state
             put("project", JsonPrimitive(st.project)); put("session", JsonPrimitive(st.session))
@@ -175,6 +185,8 @@ object MessageCodec {
         put("color", Colors.toHex(s.argb))
         put("width", s.width)
     }
+
+    private fun sizes(m: Map<Tool, Double>) = buildJsonObject { m.forEach { (t, v) -> put(t.wire, v) } }
 
     private fun point(p: InkPoint) = buildJsonObject {
         put("x", p.x)
@@ -243,6 +255,21 @@ object MessageCodec {
                 if (it !in JOURNAL_ACTIONS) throw ProtocolException("invalid field action")
             },
             f.optionalString("name"),
+        )
+        "tool.state" -> {
+            val sz = toolSizes(f.obj("sizes"))
+            val s = app.inkbridge.core.canvas.ToolSettings(
+                f.tool("tool"),
+                sz[Tool.PEN] ?: throw ProtocolException("missing field sizes"),
+                sz[Tool.HIGHLIGHTER] ?: throw ProtocolException("missing field sizes"),
+                sz[Tool.ERASER] ?: throw ProtocolException("missing field sizes"),
+            )
+            Payload.ToolState(s, f.nonNegativeLong("revision"), f.nonNegativeLong("ack"))
+        }
+        "tool.request" -> Payload.ToolRequest(
+            f.nonNegativeLong("seq"),
+            f.optionalString("tool")?.let { Tool.fromWire(it) ?: throw ProtocolException("invalid field tool") },
+            f.optionalObj("sizes")?.let(::toolSizes) ?: emptyMap(),
         )
         "storage.state" -> Payload.Storage(StorageState(
             f.string("project"), f.string("session"), f.string("location"),
@@ -333,6 +360,17 @@ object MessageCodec {
         val w = f.double("width")
         if (w == null || w !in WIDTH_RANGE) throw ProtocolException("invalid field style")
         return WireStyle(argb, w)
+    }
+
+    /** `{"pen": 4, …}`: only sizable tools, each a finite width in (0, 1000] canvas px. Receivers clamp to the tool's range. */
+    private fun toolSizes(o: JsonObject): Map<Tool, Double> {
+        val f = Fields(o)
+        return o.keys.associate { k ->
+            val t = Tool.fromWire(k)?.takeIf { it != Tool.LASER } ?: throw ProtocolException("invalid field sizes")
+            val v = f.double(k)
+            if (v == null || v <= 0 || v > 1000) throw ProtocolException("invalid field sizes")
+            t to v
+        }
     }
 
     private fun point(o: JsonObject, field: String): InkPoint {

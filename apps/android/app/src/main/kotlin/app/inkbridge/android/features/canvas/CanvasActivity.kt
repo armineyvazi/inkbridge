@@ -73,7 +73,15 @@ class CanvasActivity : InkActivity() {
             val c = manager.client
             for (e in events) {
                 c.submit(e)  // network first: the Mac is where the user looks
-                manager.document.applyLocal(e, LOCAL_STYLE)
+                if (e is app.inkbridge.core.input.StylusEvent.Begin) {
+                    // Draw with the selected tool and size at once; the Mac's stroke.style
+                    // (a few ms later) confirms or corrects it. No network or disk on this path.
+                    val t = manager.tools.value
+                    val tool = if (e.tool == app.inkbridge.core.protocol.Tool.ERASER) e.tool else t.tool
+                    manager.document.applyLocal(e, WireStyle(0xFF000000.toInt(), t.size(tool) ?: LOCAL_STYLE.width), tool)
+                } else {
+                    manager.document.applyLocal(e, LOCAL_STYLE)
+                }
             }
         }
         // The canvas adds viewport handling; everything else (document, storage, journal…)
@@ -91,8 +99,13 @@ class CanvasActivity : InkActivity() {
                 setPadding(Ink.dp(context, 14), Ink.dp(context, 8), Ink.dp(context, 14), Ink.dp(context, 8))
                 visibility = View.GONE
             }
+            penBar = PenBar(this@CanvasActivity, onTool = manager::selectTool, onStep = ::stepSize, onSwatch = ::togglePenSheet)
+            addView(penBar, FrameLayout.LayoutParams(-2, -2, Gravity.TOP or Gravity.START).apply {
+                topMargin = Ink.dp(context, 12); marginStart = Ink.dp(context, 12)
+            })
+            // Under the pen group: which day the ink goes to while the journal is open.
             addView(journalHeader, FrameLayout.LayoutParams(-2, -2, Gravity.TOP or Gravity.START).apply {
-                topMargin = Ink.dp(context, 14); marginStart = Ink.dp(context, 12)
+                topMargin = Ink.dp(context, 12 + BAR + 4 + 10); marginStart = Ink.dp(context, 12)
             })
             chipView = chip()
             // Bottom left: status stays readable without sharing the top edge with the tools.
@@ -113,6 +126,7 @@ class CanvasActivity : InkActivity() {
         })
         hideSystemBars()
         observe(manager.status) { renderStatus(it) }
+        observe(manager.tools) { renderPen() }
         observe(kotlinx.coroutines.flow.combine(manager.journal, manager.client.state) { j, s -> j to (s is ClientState.Ready) }) { (j, c) ->
             renderJournal(j, c)
         }
@@ -213,6 +227,7 @@ class CanvasActivity : InkActivity() {
         val root = canvas.parent as FrameLayout
         journalSheet?.let { root.removeView(it); journalSheet = null; return }
         sheet?.let { root.removeView(it); sheet = null }
+        closePenSheet()
         val panel = JournalSheet(this, request = { a, n -> manager.requestJournal(a, n) }, onClose = ::toggleJournalSheet)
         panel.render(manager.journal.value, manager.client.state.value is ClientState.Ready)
         root.addView(panel, FrameLayout.LayoutParams(Ink.dp(this, 400), -2, Gravity.TOP or Gravity.END).apply {
@@ -232,6 +247,46 @@ class CanvasActivity : InkActivity() {
         journalSheet?.render(j, connected)
     }
 
+    // MARK: Pen size
+
+    private lateinit var penBar: PenBar
+    private var penSheet: PenSheet? = null
+
+    private fun renderPen() {
+        val t = manager.tools.value
+        val zoom = canvas.viewport.zoom
+        penBar.render(t, zoom)
+        penSheet?.render(t, zoom)
+    }
+
+    /** − / + in the toolbar: one step for the selected tool, applied to the next stroke. */
+    private fun stepSize(up: Boolean) {
+        val t = manager.tools.value
+        val spec = app.inkbridge.core.canvas.ToolSize.of(t.tool) ?: return
+        manager.setToolSize(t.tool, spec.step(t.size(t.tool) ?: spec.default, up))
+    }
+
+    private fun togglePenSheet() {
+        val root = canvas.parent as FrameLayout
+        if (penSheet != null) { closePenSheet(); return }
+        sheet?.let { root.removeView(it); sheet = null }
+        journalSheet?.let { root.removeView(it); journalSheet = null }
+        val panel = PenSheet(this, onTool = manager::selectTool,
+            onSize = { tool, v, final ->
+                manager.setToolSize(tool, v, send = final)
+            }, onClose = ::closePenSheet)
+        panel.render(manager.tools.value, canvas.viewport.zoom)
+        root.addView(panel, FrameLayout.LayoutParams(Ink.dp(this, 440), -2, Gravity.TOP or Gravity.START).apply {
+            topMargin = Ink.dp(this@CanvasActivity, 12 + BAR + 12); marginStart = Ink.dp(this@CanvasActivity, 12)
+        })
+        penSheet = panel
+    }
+
+    private fun closePenSheet() {
+        penSheet?.let { (canvas.parent as FrameLayout).removeView(it) }
+        penSheet = null
+    }
+
     // MARK: Background
 
     private var sheet: View? = null
@@ -240,6 +295,7 @@ class CanvasActivity : InkActivity() {
         val root = canvas.parent as FrameLayout
         sheet?.let { root.removeView(it); sheet = null; return }
         journalSheet?.let { root.removeView(it); journalSheet = null }
+        closePenSheet()
         val panel = BackgroundSheet(this, manager.document.background, onPick = ::setBackground, onClose = ::toggleBackgroundSheet)
         root.addView(panel, FrameLayout.LayoutParams(Ink.dp(this, 380), -2, Gravity.TOP or Gravity.END).apply {
             topMargin = Ink.dp(this@CanvasActivity, 12 + BAR + 12); marginEnd = Ink.dp(this@CanvasActivity, 12)
@@ -264,7 +320,8 @@ class CanvasActivity : InkActivity() {
     private fun setControls(visible: Boolean) {
         bar.visibility = if (visible) View.VISIBLE else View.GONE
         chipView.visibility = bar.visibility
-        if (!visible) sheet?.let { (canvas.parent as FrameLayout).removeView(it); sheet = null }
+        penBar.visibility = bar.visibility
+        if (!visible) { sheet?.let { (canvas.parent as FrameLayout).removeView(it); sheet = null }; closePenSheet() }
         collapsed.visibility = if (visible) View.GONE else View.VISIBLE
     }
 
@@ -330,6 +387,7 @@ class CanvasActivity : InkActivity() {
         renderer.setViewport(v)
         if (!fromHost) manager.client.submitViewport(v)
         Ink.setText(zoomLabel, "${(v.zoom * 100).toInt()}%")
+        renderPen()  // the swatch shows the on-screen thickness at this zoom
     }
 
     private fun hideSystemBars() {
@@ -342,7 +400,7 @@ class CanvasActivity : InkActivity() {
     }
 
     companion object {
-        /** Until the Mac styles a stroke (a few ms later), draw it black at 2.5 canvas px. */
+        /** Fallback look for a local stroke until the Mac styles it (tools without a size). */
         private val LOCAL_STYLE = WireStyle(0xFF000000.toInt(), 2.5)
         private const val BAR = 48
     }

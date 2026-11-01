@@ -241,17 +241,27 @@ struct ToolbarView: View {
             .overlay(Circle().strokeBorder(.primary.opacity(selected ? 0.9 : 0.2), lineWidth: selected ? 2 : 1))
     }
 
+    /// Size of the selected tool in canvas px (page units, shared with the tablet).
     @ViewBuilder private var widthSlider: some View {
         switch model.tool {
         case .pen:
-            Slider(value: $model.penWidth, in: 1...12).frame(width: 80).help("Pen width")
+            sizeSlider($model.penWidth, .pen, help: "Pen width on the page")
         case .highlighter:
-            Slider(value: $model.highlighterWidth, in: 8...48).frame(width: 80).help("Highlighter width")
+            sizeSlider($model.highlighterWidth, .highlighter, help: "Highlighter width on the page")
         case .eraser:
-            Slider(value: $model.eraserRadius, in: 0.005...0.06).frame(width: 80).help("Eraser size")
+            sizeSlider($model.eraserSize, .eraser, help: "Eraser radius on the page")
         case .laser:
-            Spacer().frame(width: 80)
+            Spacer().frame(width: 104)
         }
+    }
+
+    private func sizeSlider(_ value: Binding<Double>, _ spec: ToolSize, help: String) -> some View {
+        HStack(spacing: 4) {
+            Slider(value: value, in: spec.range, step: 0.5).frame(width: 74)
+            Text(value.wrappedValue == value.wrappedValue.rounded() ? "\(Int(value.wrappedValue))" : String(format: "%.1f", value.wrappedValue))
+                .font(.caption.monospacedDigit()).frame(width: 26, alignment: .trailing)
+        }
+        .help(help + " (same setting as the tablet's size control)")
     }
 
     /// Everything not on the bar at the current size, plus layout controls.

@@ -94,11 +94,16 @@ class CanvasDocument {
 
     // MARK: Local input
 
-    fun applyLocal(e: StylusEvent, defaultStyle: WireStyle) {
+    /**
+     * A local pen sample. [tool] overrides the event's tool for display: the tablet's
+     * selected tool (highlighter, eraser), so new ink looks right before the Mac's
+     * `stroke.style` arrives. The hardware eraser end always erases.
+     */
+    fun applyLocal(e: StylusEvent, defaultStyle: WireStyle, tool: Tool? = null) {
         val change: Change = synchronized(lock) {
             when (e) {
                 is StylusEvent.Begin -> {
-                    strokes[e.strokeId] = Stroke(e.strokeId, e.tool, defaultStyle, local = true).also { it.add(e.point) }
+                    strokes[e.strokeId] = Stroke(e.strokeId, if (e.tool == Tool.ERASER) Tool.ERASER else tool ?: e.tool, defaultStyle, local = true).also { it.add(e.point) }
                     pending += e.strokeId
                     Change.Grew(e.strokeId)
                 }

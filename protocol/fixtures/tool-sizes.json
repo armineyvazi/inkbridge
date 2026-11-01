@@ -1,0 +1,99 @@
+{
+  "unit": "canvas px (1 = one tablet pixel at 100 % zoom)",
+  "default_tool": "pen",
+  "tools": {
+    "pen": {
+      "default": 4,
+      "min": 0.5,
+      "max": 24,
+      "presets": [
+        1.5,
+        3,
+        4.5,
+        7,
+        11
+      ]
+    },
+    "highlighter": {
+      "default": 36,
+      "min": 6,
+      "max": 96,
+      "presets": [
+        16,
+        24,
+        36,
+        52,
+        72
+      ]
+    },
+    "eraser": {
+      "default": 28,
+      "min": 4,
+      "max": 160,
+      "presets": [
+        8,
+        16,
+        28,
+        48,
+        80
+      ]
+    }
+  },
+  "steps": [
+    {
+      "tool": "pen",
+      "from": 4,
+      "up": 4.5,
+      "down": 3.5
+    },
+    {
+      "tool": "pen",
+      "from": 0.5,
+      "up": 1,
+      "down": 0.5
+    },
+    {
+      "tool": "pen",
+      "from": 24,
+      "up": 24,
+      "down": 22
+    },
+    {
+      "tool": "pen",
+      "from": 11,
+      "up": 12,
+      "down": 10
+    },
+    {
+      "tool": "pen",
+      "from": 4.3,
+      "up": 4.5,
+      "down": 4
+    },
+    {
+      "tool": "pen",
+      "from": 6,
+      "up": 7,
+      "down": 5.5
+    },
+    {
+      "tool": "highlighter",
+      "from": 36,
+      "up": 40,
+      "down": 32
+    },
+    {
+      "tool": "eraser",
+      "from": 28,
+      "up": 32,
+      "down": 24
+    },
+    {
+      "tool": "eraser",
+      "from": 150,
+      "up": 152,
+      "down": 144
+    }
+  ],
+  "step_rule": "increment is 0.5 below 6, 1 below 12, 2 below 24, 4 below 48, else 8; up snaps to the next multiple, down to the previous one (using the increment just below the value); then clamped"
+}

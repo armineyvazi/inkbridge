@@ -1,7 +1,9 @@
 package app.inkbridge.android.features.settings
 
 import android.content.Context
+import app.inkbridge.core.canvas.ToolSettings
 import app.inkbridge.core.canvas.Viewport
+import app.inkbridge.core.protocol.Tool
 import app.inkbridge.core.connection.ConnectionMode
 import app.inkbridge.core.input.PressureResponse
 import app.inkbridge.core.transport.DEFAULT_USB_PORT
@@ -31,6 +33,8 @@ data class AppSettings(
     val cleanRefresh: Boolean = true,
     val textSize: TextSize = TextSize.NORMAL,
     val lastViewport: Viewport = Viewport.HOME,
+    /** Selected tool and per-tool sizes: the last state agreed with the Mac, used offline and at startup. */
+    val tools: ToolSettings = ToolSettings(),
 ) {
     companion object {
         private const val PREFS = "inkbridge"
@@ -56,6 +60,12 @@ data class AppSettings(
                 lastViewport = Viewport(
                     p.getFloat("vpX", 0f).toDouble(), p.getFloat("vpY", 0f).toDouble(), p.getFloat("vpZoom", 1f).toDouble(),
                 ),
+                tools = ToolSettings(
+                    Tool.fromWire(p.getString("tool", null) ?: "") ?: d.tools.tool,
+                    p.getFloat("sizePen", d.tools.pen.toFloat()).toDouble(),
+                    p.getFloat("sizeHighlighter", d.tools.highlighter.toFloat()).toDouble(),
+                    p.getFloat("sizeEraser", d.tools.eraser.toFloat()).toDouble(),
+                ).clamped(),
             )
         }
 
@@ -87,6 +97,10 @@ data class AppSettings(
             .putFloat("vpX", lastViewport.x.toFloat())
             .putFloat("vpY", lastViewport.y.toFloat())
             .putFloat("vpZoom", lastViewport.zoom.toFloat())
+            .putString("tool", tools.tool.wire)
+            .putFloat("sizePen", tools.pen.toFloat())
+            .putFloat("sizeHighlighter", tools.highlighter.toFloat())
+            .putFloat("sizeEraser", tools.eraser.toFloat())
             // v2's permanent pairing code is meaningless with v3 one-time codes.
             .remove("pairingCode")
             .apply()

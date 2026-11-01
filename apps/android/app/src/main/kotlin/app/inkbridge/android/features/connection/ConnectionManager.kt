@@ -121,6 +121,41 @@ class ConnectionManager(private val ctx: Context) {
         return true
     }
 
+    private val toolSync = app.inkbridge.core.canvas.ToolSync(settings.tools)
+    private val _tools = MutableStateFlow(settings.tools)
+    /**
+     * The selected tool and per-tool sizes. Changes apply here at once (new local ink uses
+     * them immediately), are saved, and are sent to the Mac, which styles the strokes.
+     * Offline, the request waits in the outbox and is applied when the link returns.
+     */
+    val tools: StateFlow<app.inkbridge.core.canvas.ToolSettings> = _tools.asStateFlow()
+
+    fun selectTool(t: app.inkbridge.core.protocol.Tool) {
+        val cur = toolSync.settings
+        if (cur.tool == t) return
+        commitTools(cur.copy(tool = t), toolChanged = true, sizeOf = null)
+    }
+
+    /** Sets [t]'s size; only that tool changes. [send] false while a slider is still moving. */
+    fun setToolSize(t: app.inkbridge.core.protocol.Tool, size: Double, send: Boolean = true) {
+        val next = toolSync.settings.withSize(t, size)
+        if (!send) { _tools.value = next; return }
+        commitTools(next, toolChanged = false, sizeOf = t)
+    }
+
+    private fun commitTools(next: app.inkbridge.core.canvas.ToolSettings, toolChanged: Boolean, sizeOf: app.inkbridge.core.protocol.Tool?) {
+        val req = toolSync.edit(next, toolChanged, sizeOf)
+        _tools.value = next
+        saveTools(next)
+        client.submitToolRequest(req)
+    }
+
+    private fun saveTools(t: app.inkbridge.core.canvas.ToolSettings) {
+        if (settings.tools == t) return
+        settings = settings.copy(tools = t)
+        settings.save(ctx)
+    }
+
     /** Mirrors every host document message, whichever screen is showing. The canvas adds viewport handling. */
     val defaultHostHandler: (app.inkbridge.core.protocol.Payload) -> Unit = { p ->
         when (p) {
@@ -131,6 +166,9 @@ class ConnectionManager(private val ctx: Context) {
                 _storageRequest.value = null
             }
             is app.inkbridge.core.protocol.Payload.Journal -> scope.launch { _journal.value = p }
+            is app.inkbridge.core.protocol.Payload.ToolState -> scope.launch {
+                if (toolSync.receive(p)) { _tools.value = toolSync.settings; saveTools(toolSync.settings) }
+            }
             is app.inkbridge.core.protocol.Payload.CanvasViewport -> Unit
             else -> document.applyHost(p)
         }
@@ -154,6 +192,12 @@ class ConnectionManager(private val ctx: Context) {
                     is ClientState.Ready -> "ready ${st.kind}"
                     else -> st.javaClass.simpleName.lowercase()
                 })
+                if (st is ClientState.Ready) {
+                    // Re-baseline tool settings on every connection (see ToolSync.connected).
+                    val req = toolSync.connected()
+                    if (req != null) client.submitToolRequest(req)
+                    else if (toolSync.adoptLatest()) { _tools.value = toolSync.settings; saveTools(toolSync.settings) }
+                }
                 if (st is ClientState.Ready) {
                     _paired.value?.takeIf { settings.mode == ConnectionMode.WIFI }?.let {
                         val updated = it.copy(lastConnectedAt = System.currentTimeMillis(), lastAddress = lastAddress ?: it.lastAddress)
