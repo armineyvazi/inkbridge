@@ -173,6 +173,9 @@ public enum Payload: Equatable, Sendable {
     /// revision (apply only if newer). Device → host is a request; the host applies
     /// it, bumps the revision and echoes it back (the host is the single writer).
     case canvasBackground(CanvasBackground, revision: UInt64)
+    /// Host → device: the engineering diagram, with connector paths already routed
+    /// (so the tablet draws exactly what the Mac draws). Whole snapshot: diagrams are small.
+    case diagramState(Diagram, revision: UInt64)
     /// Host → device: project, session, save status (sent on change and on connect).
     case storageState(StorageState)
     /// Device → host: "save_now" | "new_session" | "switch_project" | "create_project" | "use_location".
@@ -208,6 +211,7 @@ public enum Payload: Equatable, Sendable {
         case .strokeStyle: return "stroke.style"
         case .canvasViewport: return "canvas.viewport"
         case .canvasBackground: return "canvas.background"
+        case .diagramState: return "diagram.state"
         case .storageState: return "storage.state"
         case .storageRequest: return "storage.request"
         case .canvasCommand: return "canvas.command"

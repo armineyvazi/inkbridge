@@ -13,4 +13,4 @@
   - on-screen alignment;
   - text entry through the system keyboard.
   The panel is monochrome and needs no drag precision.
-- **Not built yet.** See [../engineering/engineering-workspace.md](../engineering/engineering-workspace.md).
+- **Built (Mac):** toolbar Engineering button (⌃⌥G) → Studio Canvas with engineering paper plus a floating **Engineering panel** on the right: Select/Connect, connector kind and route, inspector, align/distribute, Duplicate/Delete, searchable component grid, Templates menu. **Tablet:** read-only preview. See [../engineering/engineering-workspace.md](../engineering/engineering-workspace.md).

@@ -52,6 +52,15 @@ class CanvasDocument {
     /** The background layer as last confirmed by the Mac, or set optimistically here. */
     @Volatile var background: CanvasBackground = CanvasBackground.OVERLAY
         private set
+    /** The engineering diagram (read-only on the tablet; the Mac edits it). */
+    @Volatile var diagram: DiagramSnapshot = DiagramSnapshot()
+        private set
+    @Volatile var diagramRevision: Long = -1
+        private set
+
+    /** Ink plus diagram, for Fit. */
+    fun contentBoundsWithDiagram(): Bounds = contentBounds().union(diagram.bounds())
+
     /** The Mac revision [background] came from; older host messages are ignored. */
     @Volatile var backgroundRevision: Long = 0
         private set
@@ -161,6 +170,13 @@ class CanvasDocument {
                     if (p.revision < backgroundRevision) return@synchronized null
                     backgroundRevision = p.revision
                     if (p.background == background) null else { background = p.background; Change.Full }
+                }
+                is Payload.Diagram -> {
+                    // A restarted Mac starts its revisions again; a new session's first snapshot always applies.
+                    if (p.revision < diagramRevision && p.revision > 1L) return@synchronized null
+                    diagramRevision = p.revision
+                    diagram = p.diagram
+                    Change.Full
                 }
                 is Payload.DocReset -> {
                     strokes.keys.retainAll(pending)

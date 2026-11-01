@@ -114,6 +114,10 @@ sealed interface Payload {
     data class Background(val background: app.inkbridge.core.canvas.CanvasBackground, val revision: Long) : Payload {
         override val type get() = "canvas.background"
     }
+    /** Host → device: the engineering diagram (whole snapshot, routes included). */
+    data class Diagram(val diagram: app.inkbridge.core.canvas.DiagramSnapshot, val revision: Long) : Payload {
+        override val type get() = "diagram.state"
+    }
     /** Host → device: what the Mac is saving to and how it is going (paths are display strings). */
     data class Storage(val state: StorageState) : Payload {
         override val type get() = "storage.state"

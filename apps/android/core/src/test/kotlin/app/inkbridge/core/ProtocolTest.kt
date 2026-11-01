@@ -30,7 +30,7 @@ class MessageCodecTest {
     @Test
     fun everyValidFixtureDecodesAndRoundTrips() {
         val files = Fixtures.files("valid")
-        assertEquals(26, files.size)
+        assertEquals(27, files.size)
         for (f in files) {
             val m = MessageCodec.decode(f.readBytes())
             assertTrue(f.name.startsWith(m.payload.type + "."), f.name)

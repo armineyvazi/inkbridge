@@ -102,6 +102,7 @@ final class StorageController: ObservableObject {
         saving = true
         setStatus(.saving)
         let strokes = coordinator.store.strokes
+        let diagram = coordinator.store.diagram
         var meta = coordinator.makeMetadata()
         meta.title = sessionTitle
         let dir = sessionDir
@@ -110,7 +111,7 @@ final class StorageController: ObservableObject {
         ioQueue.async { [weak self] in
             let result: Result<Void, StorageError>
             do {
-                try SessionArchive.writeStrokes(strokes, metadata: meta, to: dir)
+                try SessionArchive.writeStrokes(strokes, metadata: meta, diagram: diagram, to: dir)
                 result = .success(())
             } catch {
                 result = .failure(StorageError.from(error, path: dir.path))
@@ -134,7 +135,7 @@ final class StorageController: ObservableObject {
 
     /// A session nobody drew in (and that was never saved) is not worth a folder.
     private var isPristine: Bool {
-        coordinator.store.strokes.isEmpty && coordinator.store.background == .overlay
+        coordinator.store.strokes.isEmpty && coordinator.store.diagram.isEmpty && coordinator.store.background == .overlay
             && !FileManager.default.fileExists(atPath: sessionDir.path)
     }
 
@@ -144,7 +145,7 @@ final class StorageController: ObservableObject {
         var meta = coordinator.makeMetadata()
         meta.title = sessionTitle
         do {
-            try SessionArchive.writeStrokes(coordinator.store.strokes, metadata: meta, to: sessionDir)
+            try SessionArchive.writeStrokes(coordinator.store.strokes, metadata: meta, diagram: coordinator.store.diagram, to: sessionDir)
             savedVersion = coordinator.store.documentVersion
             setStatus(.saved(Date()))
         } catch {
@@ -197,7 +198,8 @@ final class StorageController: ObservableObject {
         let (meta, strokes): (SessionMetadata, [Stroke])
         do { (meta, strokes) = try SessionArchive.load(from: dir) } catch { throw StorageError.from(error, path: dir.path) }
         config.activeProject = project
-        coordinator.startSession(id: id, strokes: strokes, background: meta.background ?? .overlay, viewport: meta.viewport)
+        coordinator.startSession(id: id, strokes: strokes, background: meta.background ?? .overlay, viewport: meta.viewport,
+                                 diagram: SessionArchive.loadDiagram(from: dir))
         sessionTitle = meta.title
         savedVersion = coordinator.store.documentVersion
         setStatus(.saved(meta.savedAt))

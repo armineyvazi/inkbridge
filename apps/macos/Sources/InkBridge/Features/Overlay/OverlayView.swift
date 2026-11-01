@@ -25,6 +25,10 @@ final class OverlayView: NSView {
     var onZoom: ((Double, CGPoint) -> Void)?
     /// Key commands while the studio has focus; returns true if handled.
     var onKey: ((NSEvent) -> Bool)?
+    /// Drawn after the background and before ink: the engineering diagram.
+    var drawUnderInk: ((CGContext, CoordinateMapper) -> Void)?
+    private(set) var lastClickCount = 1
+    private(set) var lastShift = false
     var crosshair = false {
         didSet { window?.invalidateCursorRects(for: self); if crosshair != oldValue { updateTrackingAreas() } }
     }
@@ -53,7 +57,11 @@ final class OverlayView: NSView {
     override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
     override var acceptsFirstResponder: Bool { true }
 
-    override func mouseDown(with e: NSEvent) { onMouse?(.down(convert(e.locationInWindow, from: nil))) }
+    override func mouseDown(with e: NSEvent) {
+        lastClickCount = e.clickCount
+        lastShift = e.modifierFlags.contains(.shift)
+        onMouse?(.down(convert(e.locationInWindow, from: nil)))
+    }
     override func mouseDragged(with e: NSEvent) { onMouse?(.drag(convert(e.locationInWindow, from: nil))) }
     override func mouseUp(with e: NSEvent) { onMouse?(.up) }
 
@@ -102,6 +110,7 @@ final class OverlayView: NSView {
         // Background layer first (own layer: never baked into the stroke cache).
         if store.background.mode == .overlay { ctx.clear(dirtyRect) }
         BackgroundRenderer.draw(store.background, in: ctx, mapper: mapper, rect: dirtyRect)
+        drawUnderInk?(ctx, mapper)
         if cacheRevision != store.revision { rebuildCache() }
         if let cache {
             // CGImages draw bottom-up; undo the view's flip for the blit.

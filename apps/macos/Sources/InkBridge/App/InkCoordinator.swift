@@ -22,6 +22,11 @@ final class InkCoordinator: NSObject {
     private(set) var sessionID: String
     private(set) lazy var storage = StorageController(coordinator: self)
     private(set) lazy var storageWindow = StorageWindowController(coordinator: self)
+    let engineering = EngineeringModel()
+    private(set) lazy var engineeringPanel = EngineeringPanelController(model: engineering, actions: self)
+    var diagramDrag: DiagramDrag?
+    var sentDiagramRevision: UInt64 = 0
+    var lastDiagramSyncNs: Int64 = 0
     let sessionStarted = Date()
     let log = Logger(subsystem: "app.inkbridge", category: "coordinator")
 
@@ -71,7 +76,9 @@ final class InkCoordinator: NSObject {
     }
 
     var interaction: WindowInteraction {
-        WindowInteraction.resolve(workspace: store.background.mode, pointer: model.pointerMode)
+        // Engineering edits with the mouse, so it behaves like a studio surface.
+        WindowInteraction.resolve(workspace: engineering.active ? .studio : store.background.mode,
+                                  pointer: engineering.active ? .pointer : model.pointerMode)
     }
 
     /// Pushes the interaction policy into the window and view.
@@ -100,6 +107,7 @@ final class InkCoordinator: NSObject {
     private var lastPanPoint: CGPoint?
 
     private func handleMouse(_ e: OverlayView.MouseEvent) {
+        if engineering.active && !(model.pointerMode == .draw) { handleDiagramMouse(e); return }
         let w = interaction
         let mapper = overlayView.mapper
         switch e {
@@ -155,6 +163,7 @@ final class InkCoordinator: NSObject {
 
     /// Keys while the studio has focus. Global ⌃⌥ shortcuts keep working everywhere.
     private func handleKey(_ e: NSEvent) -> Bool {
+        if engineering.active, handleDiagramKey(e) { return true }
         let cmd = e.modifierFlags.contains(.command)
         switch (e.keyCode, cmd) {
         case (53, _):  // Esc: back to the desktop
@@ -284,6 +293,7 @@ final class InkCoordinator: NSObject {
         overlayView.onPan = { [weak self] dx, dy in self?.pan(dx, dy) }
         overlayView.onZoom = { [weak self] f, p in self?.zoom(f, at: p) }
         overlayView.onKey = { [weak self] e in self?.handleKey(e) ?? false }
+        overlayView.drawUnderInk = { [weak self] ctx, mapper in self?.drawDiagram(ctx, mapper) }
         applyInteraction()
         overlayWindow?.orderFrontRegardless()
         updateEraserRadius()
@@ -349,9 +359,11 @@ final class InkCoordinator: NSObject {
     }
 
     /// Replaces the open document (new or opened session). The tablet gets a full resync.
-    func startSession(id: String, strokes: [Stroke], background: CanvasBackground, viewport: Viewport) {
+    func startSession(id: String, strokes: [Stroke], background: CanvasBackground, viewport: Viewport, diagram: Diagram = Diagram()) {
         store.endAll()
-        store.load(strokes, background: background)
+        store.load(strokes, background: background, diagram: diagram)
+        engineering.selection = []
+        engineering.diagramVersion += 1
         sessionID = id
         server.setSessionID(id)
         ingestor.viewport = viewport
@@ -366,6 +378,7 @@ final class InkCoordinator: NSObject {
             sentBackgroundRevision = nil
             syncBackground()
             server.send(.canvasViewport(viewport), to: peer.id)
+            syncDiagram(force: true)
         }
     }
 
@@ -566,6 +579,7 @@ extension InkCoordinator: InkServerDelegate {
             sentBackgroundRevision = nil
             syncBackground()
             server.send(.storageState(storage.state()), to: peer.id)
+            syncDiagram(force: true)
         }
         relayoutOverlay()
     }

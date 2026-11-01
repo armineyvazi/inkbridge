@@ -16,6 +16,8 @@ public final class StrokeStore {
         case clear([Stroke])
         /// Background layer change; strokes are untouched.
         case background(from: CanvasBackground, to: CanvasBackground)
+        /// Diagram edit (add/move/resize/connect/delete/align…): whole-diagram snapshots, small.
+        case diagram(from: Diagram, to: Diagram)
     }
 
     public private(set) var strokes: [Stroke] = []
@@ -37,8 +39,36 @@ public final class StrokeStore {
     /// Bumped on every background change (including undo/redo). Sent with
     /// `canvas.background` so a tablet never applies an older state over a newer one.
     public private(set) var backgroundRevision: UInt64 = 0
-    /// Changes whenever strokes or background change; for autosave.
-    public var documentVersion: Int { revision + Int(backgroundRevision) }
+    /// The engineering diagram layer (structured objects, separate from ink).
+    public private(set) var diagram = Diagram()
+    public private(set) var diagramRevision: UInt64 = 0
+
+    /// Changes whenever strokes, background or diagram change; for autosave.
+    public var documentVersion: Int { revision + Int(backgroundRevision) + Int(diagramRevision) }
+
+    /// Applies a diagram edit as one undo step. Returns false if nothing changed.
+    @discardableResult
+    public func setDiagram(_ d: Diagram) -> Bool {
+        guard d != diagram else { return false }
+        let old = diagram
+        diagram = d
+        diagramRevision += 1
+        record(.diagram(from: old, to: d))
+        return true
+    }
+
+    /// Live preview during a drag: changes the diagram without an undo step.
+    /// The drag ends with `setDiagram(final, undoFrom: start)`.
+    public func previewDiagram(_ d: Diagram) {
+        diagram = d
+        diagramRevision += 1
+    }
+
+    public func commitDiagram(_ d: Diagram, undoFrom start: Diagram) {
+        diagram = d
+        diagramRevision += 1
+        if d != start { record(.diagram(from: start, to: d)) }
+    }
 
     /// Eraser radius in canvas px. The coordinator converts the toolbar's
     /// on-screen size using the current zoom.
@@ -153,6 +183,11 @@ public final class StrokeStore {
             applyBackground(from)
             redoStack.append(command)
             return
+        case let .diagram(from, _):
+            diagram = from
+            diagramRevision += 1
+            redoStack.append(command)
+            return
         case .add(let s):
             strokes.removeAll { $0.id == s.id }
         case .erase(let removed):
@@ -171,6 +206,11 @@ public final class StrokeStore {
             applyBackground(to)
             undoStack.append(command)
             return
+        case let .diagram(_, to):
+            diagram = to
+            diagramRevision += 1
+            undoStack.append(command)
+            return
         case .add(let s):
             strokes.append(s)
         case .erase(let removed):
@@ -185,8 +225,10 @@ public final class StrokeStore {
     }
 
     /// Replaces the document, e.g. when restoring a saved session.
-    public func load(_ strokes: [Stroke], background: CanvasBackground? = nil) {
+    public func load(_ strokes: [Stroke], background: CanvasBackground? = nil, diagram: Diagram = Diagram()) {
         if let background { applyBackground(background) }
+        self.diagram = diagram
+        diagramRevision += 1
         self.strokes = strokes
         active.removeAll()
         undoStack.removeAll()

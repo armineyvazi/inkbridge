@@ -20,6 +20,7 @@ protocol ToolbarActions: AnyObject {
     func setPointerMode(_ mode: PointerMode)
     var storageController: StorageController { get }
     func showStorage()
+    func setEngineering(_ on: Bool)
 }
 
 /// Save state at a glance; click for Projects & Storage.
@@ -77,6 +78,7 @@ struct ToolbarView: View {
     @ViewBuilder private var expanded: some View {
         if !vertical { StatusBadge(model: model); separator }
         BackgroundButton(model: model, actions: actions)
+        engineeringButton
         pointerToggle
         separator
         toolButtons
@@ -98,6 +100,7 @@ struct ToolbarView: View {
     @ViewBuilder private var compact: some View {
         statusDot
         BackgroundButton(model: model, actions: actions)
+        engineeringButton
         pointerToggle
         toolButtons
         colorMenu
@@ -124,6 +127,19 @@ struct ToolbarView: View {
     }
 
     // MARK: Pieces
+
+    /// Engineering workspace: diagram components, connectors, templates (⌃⌥G).
+    private var engineeringButton: some View {
+        let on = model.engineeringActive
+        return Button { actions?.setEngineering(!on) } label: {
+            Image(systemName: "point.3.connected.trianglepath.dotted")
+                .frame(width: 28, height: 26)
+                .background(on ? Color.accentColor.opacity(0.25) : .clear)
+                .clipShape(RoundedRectangle(cornerRadius: 6))
+        }
+        .buttonStyle(.plain)
+        .help(on ? "Leave Engineering (⌃⌥G)" : "Engineering: architecture components, smart connectors, templates (⌃⌥G)")
+    }
 
     /// Mouse: use the apps underneath, or draw. Always visible so the state is never a surprise.
     private var pointerToggle: some View {

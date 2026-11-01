@@ -131,13 +131,24 @@ public enum SessionArchive {
     // MARK: Autosave
 
     /// Writes metadata and strokes only. Cheap enough for autosave.
-    public static func writeStrokes(_ strokes: [Stroke], metadata: SessionMetadata, to dir: URL) throws {
+    public static func writeStrokes(_ strokes: [Stroke], metadata: SessionMetadata, diagram: Diagram = Diagram(), to dir: URL) throws {
         try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
         try encoder.encode(strokes).write(to: dir.appendingPathComponent("strokes.json"), options: .atomic)
+        let diagramURL = dir.appendingPathComponent("diagram.json")
+        if diagram.isEmpty {
+            try? FileManager.default.removeItem(at: diagramURL)
+        } else {
+            try encoder.encode(diagram).write(to: diagramURL, options: .atomic)
+        }
         try encoder.encode(metadata).write(to: dir.appendingPathComponent("session.json"), options: .atomic)
     }
 
     /// `metadata.background` carries the background layer; nil means a pre-background session (overlay).
+    /// The session's diagram layer (empty if it has none).
+    public static func loadDiagram(from dir: URL) -> Diagram {
+        (try? decoder.decode(Diagram.self, from: Data(contentsOf: dir.appendingPathComponent("diagram.json")))) ?? Diagram()
+    }
+
     public static func load(from dir: URL) throws -> (SessionMetadata, [Stroke]) {
         let meta = try decoder.decode(SessionMetadata.self, from: Data(contentsOf: dir.appendingPathComponent("session.json")))
         guard meta.format == SessionMetadata.currentFormat else { throw ArchiveError.unsupportedFormat(meta.format) }
@@ -156,8 +167,11 @@ public enum SessionArchive {
     @discardableResult
     public static func export(
         _ strokes: [Stroke], metadata: SessionMetadata, background: CGImage?, backgroundUnavailableReason: String?,
-        options: ExportOptions, to destination: URL
+        options: ExportOptions, diagram: Diagram = Diagram(), icon: ((String) -> CGImage?)? = nil, to destination: URL
     ) throws -> ExportResult {
+        exportDiagram = diagram
+        exportIcon = icon
+        defer { exportDiagram = Diagram(); exportIcon = nil }
         let fm = FileManager.default
         let staging = destination.deletingLastPathComponent()
             .appendingPathComponent(".\(destination.lastPathComponent).inkbridge-tmp-\(UUID().uuidString)")
@@ -189,6 +203,10 @@ public enum SessionArchive {
         try writeImage(ink, to: url("annotations/annotations.png"), type: .png)
         try SVGWriter.svg(strokes, mapper: mapper).write(to: url("annotations/annotations.svg"), atomically: true, encoding: .utf8)
         try encoder.encode(strokes).write(to: url("annotations/strokes.json"))
+        if !exportDiagram.isEmpty {
+            try encoder.encode(exportDiagram).write(to: url("annotations/diagram.json"))
+            files.append("annotations/diagram.json")
+        }
         files += ["annotations/annotations.png", "annotations/annotations.svg", "annotations/strokes.json"]
 
         let fullPageName = "full-page.\(options.fullPageFormat.fileExtension)"
@@ -198,7 +216,8 @@ public enum SessionArchive {
         try encoder.encode(bg).write(to: url("background/background.json"))
         files.append("background/background.json")
         if bg.mode == .studio || bg.pattern != .none {
-            let layer = try renderImage([], mapper: mapper, background: nil, canvasBackground: bg, transparent: true, scale: options.pixelScale)
+            let layer = try renderImage([], mapper: mapper, background: nil, canvasBackground: bg, includeDiagram: false,
+                                        transparent: true, scale: options.pixelScale)
             try writeImage(layer, to: url("background/canvas-background.png"), type: .png)
             files.append("background/canvas-background.png")
         }
@@ -279,10 +298,14 @@ public enum SessionArchive {
     // MARK: Rendering
 
     /// Renders strokes at `scale` pixels per point over a screenshot, white, or transparency.
+    // The diagram for the export in progress (exports run on the main thread, one at a time).
+    nonisolated(unsafe) public static var exportDiagram = Diagram()
+    nonisolated(unsafe) public static var exportIcon: ((String) -> CGImage?)?
+
     /// Layers, bottom to top: screenshot (`background`), canvas background
-    /// (`canvasBackground`: studio fill and/or pattern), strokes.
+    /// (`canvasBackground`: studio fill and/or pattern), diagram, strokes.
     public static func renderImage(_ strokes: [Stroke], mapper: CoordinateMapper, background: CGImage?,
-                                   canvasBackground: CanvasBackground? = nil,
+                                   canvasBackground: CanvasBackground? = nil, includeDiagram: Bool = true,
                                    transparent: Bool = false, scale: CGFloat = 2) throws -> CGImage {
         let w = Int(mapper.canvas.width * scale), h = Int(mapper.canvas.height * scale)
         guard w > 0, h > 0, let ctx = CGContext(
@@ -304,6 +327,9 @@ public enum SessionArchive {
             BackgroundRenderer.draw(canvasBackground, in: ctx, mapper: mapper,
                                     rect: CGRect(origin: .zero, size: mapper.canvas))
         }
+        if includeDiagram {
+            DiagramRenderer.draw(exportDiagram, in: ctx, mapper: mapper, theme: .forBackground(canvasBackground ?? .overlay), icon: exportIcon)
+        }
         StrokeRenderer.draw(strokes, in: ctx, mapper: mapper)
         guard let image = ctx.makeImage() else { throw ArchiveError.renderFailed }
         return image
@@ -320,12 +346,13 @@ public enum SessionArchive {
         ctx.translateBy(x: 0, y: box.height)
         ctx.scaleBy(x: 1, y: -1)
         BackgroundRenderer.draw(canvasBackground, in: ctx, mapper: mapper, rect: box)
+        DiagramRenderer.draw(exportDiagram, in: ctx, mapper: mapper, theme: .forBackground(canvasBackground), icon: exportIcon)
         StrokeRenderer.draw(strokes, in: ctx, mapper: mapper)
         ctx.endPDFPage()
         ctx.closePDF()
     }
 
-    static func writeImage(_ image: CGImage, to url: URL, type: UTType, quality: Double = 0.9) throws {
+    public static func writeImage(_ image: CGImage, to url: URL, type: UTType, quality: Double = 0.9) throws {
         guard let dest = CGImageDestinationCreateWithURL(url as CFURL, type.identifier as CFString, 1, nil) else {
             throw ArchiveError.writeFailed(url.lastPathComponent)
         }

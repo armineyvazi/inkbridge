@@ -90,6 +90,26 @@ object MessageCodec {
             "pattern" to JsonPrimitive(p.background.pattern.wire),
             "revision" to JsonPrimitive(p.revision),
         )
+        is Payload.Diagram -> mapOf(
+            "revision" to JsonPrimitive(p.revision),
+            "nodes" to buildJsonArray {
+                p.diagram.nodes.forEach { n ->
+                    add(buildJsonObject {
+                        put("id", n.id); put("kind", n.kind); put("label", n.label); put("shape", n.shape)
+                        put("x", n.x); put("y", n.y); put("w", n.w); put("h", n.h)
+                    })
+                }
+            },
+            "edges" to buildJsonArray {
+                p.diagram.edges.forEach { e ->
+                    add(buildJsonObject {
+                        put("id", e.id); put("from", e.from); put("to", e.to); put("kind", e.kind); put("style", e.style)
+                        put("label", e.label); put("dashed", e.dashed)
+                        put("points", buildJsonArray { e.points.forEach { add(JsonPrimitive(it)) } })
+                    })
+                }
+            },
+        )
         is Payload.Storage -> buildMap {
             val st = p.state
             put("project", JsonPrimitive(st.project)); put("session", JsonPrimitive(st.session))
@@ -192,6 +212,7 @@ object MessageCodec {
             ),
             f.nonNegativeLong("revision"),
         )
+        "diagram.state" -> Payload.Diagram(diagram(f), f.nonNegativeLong("revision"))
         "storage.state" -> Payload.Storage(StorageState(
             f.string("project"), f.string("session"), f.string("location"),
             f.string("status").also { if (it !in setOf("empty", "saved", "saving", "unsaved", "failed")) throw ProtocolException("invalid field status") },
@@ -233,6 +254,30 @@ object MessageCodec {
         "connection.pong" -> Payload.Pong(f.nonNegativeLong("ping_id"), f.long("echo_timestamp_ns"))
         "error" -> Payload.Error(f.string("code"), f.string("message", maxLength = 512))
         else -> throw ProtocolException("unknown message type ${type.take(MAX_STRING_LENGTH)}", recoverable = true)
+    }
+
+    private fun diagram(f: Fields): app.inkbridge.core.canvas.DiagramSnapshot {
+        fun obj(e: JsonElement, key: String) = Fields(e as? JsonObject ?: throw ProtocolException("invalid field $key"))
+        val nodes = f.array("nodes").take(MAX_IDS_PER_MESSAGE).map { e ->
+            val n = obj(e, "nodes")
+            val x = n.double("x"); val y = n.double("y"); val w = n.double("w"); val h = n.double("h")
+            if (x == null || y == null || w == null || h == null || w <= 0 || h <= 0 || x !in COORDINATE_RANGE || y !in COORDINATE_RANGE) {
+                throw ProtocolException("invalid field nodes")
+            }
+            app.inkbridge.core.canvas.DiagramSnapshot.Node(n.string("id"), n.string("kind"), n.label("label"), n.string("shape"), x, y, w, h)
+        }
+        val edges = f.array("edges").take(MAX_IDS_PER_MESSAGE).map { e ->
+            val o = obj(e, "edges")
+            val pts = o.array("points").map { v ->
+                ((v as? JsonPrimitive)?.doubleOrNull ?: throw ProtocolException("invalid field points")).also {
+                    if (it !in COORDINATE_RANGE) throw ProtocolException("invalid field points")
+                }
+            }
+            if (pts.size % 2 != 0 || pts.size > 200) throw ProtocolException("invalid field points")
+            app.inkbridge.core.canvas.DiagramSnapshot.Edge(o.string("id"), o.string("from"), o.string("to"), o.string("kind"),
+                o.string("style"), o.label("label"), o.bool("dashed"), pts)
+        }
+        return app.inkbridge.core.canvas.DiagramSnapshot(nodes, edges)
     }
 
     private fun hello(f: Fields): DeviceHello {
@@ -336,6 +381,13 @@ private class Fields(val obj: JsonObject) {
         if (obj[key] == null || obj[key] is JsonNull) null else obj(key)
 
     fun tool(key: String): Tool = Tool.fromWire(string(key)) ?: throw ProtocolException("invalid field $key")
+
+    /** Like [string] but allows "" and up to 512 bytes (labels in any script). */
+    fun label(key: String): String {
+        val p = prim(key)
+        if (!p.isString || p.content.encodeToByteArray().size > 512) throw ProtocolException("invalid field $key")
+        return p.content
+    }
 
     fun stringArray(key: String): List<String> {
         val a = array(key)

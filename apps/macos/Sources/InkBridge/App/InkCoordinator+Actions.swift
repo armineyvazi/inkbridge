@@ -13,9 +13,11 @@ extension InkCoordinator: ToolbarActions {
 
     /// Applies a document edit, redraws, and mirrors the result to the tablet.
     private func edit(_ change: (StrokeStore) -> Void) {
+        let diagramBefore = store.diagramRevision
         change(store)
         overlayView.needsDisplay = true
         backgroundDidChange()  // undo/redo may have changed the background layer
+        if store.diagramRevision != diagramBefore { diagramChanged() }
         refreshEditState()
         syncDocument()
     }
@@ -110,6 +112,10 @@ extension InkCoordinator: ToolbarActions {
         keys.register(kVK_ANSI_K) { [weak self] in self?.openConnectDevice() }
         keys.register(kVK_ANSI_B) { [weak self] in self?.toggleStudio() }
         keys.register(kVK_ANSI_J) { [weak self] in self?.storageWindow.show() }
+        keys.register(kVK_ANSI_G) { [weak self] in
+            guard let self else { return }
+            self.setEngineering(!self.engineering.active)
+        }
         keys.register(kVK_ANSI_D) { [weak self] in
             guard let self else { return }
             self.setPointerMode(self.model.pointerMode == .draw ? .pointer : .draw)

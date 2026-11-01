@@ -427,7 +427,7 @@ class InkBridgeClient(
                 onHostPayload?.invoke(p)
             }
             is Payload.StrokeBegin, is Payload.StrokePoints, is Payload.StrokeEnd, is Payload.StrokeStyle,
-            is Payload.DocReset, is Payload.DocRemove, is Payload.Background, is Payload.Storage -> onHostPayload?.invoke(p)
+            is Payload.DocReset, is Payload.DocRemove, is Payload.Background, is Payload.Storage, is Payload.Diagram -> onHostPayload?.invoke(p)
             else -> Unit
         }
     }

@@ -67,6 +67,7 @@ final class MenuBarController: NSObject, NSMenuDelegate {
             menu.addItem(toolbarSubmenu("Draw On", options, #selector(setDisplay)))
         }
         add(menu, m.background.mode == .studio ? "Back to Desktop Overlay" : "Studio Canvas", #selector(toggleStudio), key: "b")
+        add(menu, m.engineeringActive ? "Leave Engineering" : "Engineering Workspace", #selector(toggleEngineering), key: "g")
         add(menu, m.pointerMode == .draw ? "Mouse: Use Apps (now Drawing)" : "Mouse: Draw (now Using Apps)", #selector(togglePointer), key: "d")
         menu.addItem(.separator())
         add(menu, m.overlayVisible ? "Hide Ink" : "Show Ink", #selector(toggleOverlay))
@@ -120,6 +121,7 @@ final class MenuBarController: NSObject, NSMenuDelegate {
     }
 
     @objc private func toggleStudio() { coordinator.toggleStudio() }
+    @objc private func toggleEngineering() { coordinator.setEngineering(!coordinator.engineering.active) }
     @objc private func togglePointer() {
         coordinator.setPointerMode(coordinator.model.pointerMode == .draw ? .pointer : .draw)
     }

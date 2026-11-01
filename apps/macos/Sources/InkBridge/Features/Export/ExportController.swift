@@ -90,7 +90,8 @@ final class ExportController {
         let options = ExportOptions(fullPageFormat: model.fullPageFormat, pixelScale: scale)
         do {
             let result = try SessionArchive.export(coordinator.store.strokes, metadata: metadata, background: background,
-                                                   backgroundUnavailableReason: backgroundReason, options: options, to: url)
+                                                   backgroundUnavailableReason: backgroundReason, options: options,
+                                                   diagram: coordinator.store.diagram, icon: InkCoordinator.icon, to: url)
             model.statusMessage = "Saved “\(url.lastPathComponent)”"
             reportSuccess(url: url, result: result)
         } catch {

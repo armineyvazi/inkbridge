@@ -1,3 +1,4 @@
+import CoreGraphics
 import Foundation
 
 /// Errors raised while decoding or validating a message.
@@ -97,6 +98,20 @@ public enum MessageCodec {
             return ["x": v.x, "y": v.y, "zoom": v.zoom]
         case let .canvasBackground(bg, revision):
             return ["mode": bg.mode.rawValue, "color": bg.color.hex, "pattern": bg.pattern.rawValue, "revision": revision]
+        case let .diagramState(d, revision):
+            func r(_ v: CGFloat) -> Double { (Double(v) * 10).rounded() / 10 }
+            return [
+                "revision": revision,
+                "nodes": d.nodes.map { n in
+                    ["id": n.id, "kind": n.kind, "label": n.label, "shape": n.component.shape.rawValue,
+                     "x": r(n.frame.minX), "y": r(n.frame.minY), "w": r(n.frame.width), "h": r(n.frame.height)] as [String: Any]
+                },
+                "edges": d.edges.map { e in
+                    ["id": e.id, "from": e.from, "to": e.to, "kind": e.kind.rawValue, "style": e.style.rawValue, "label": e.label,
+                     "dashed": !e.kind.dash.isEmpty,
+                     "points": d.path(of: e).flatMap { [r($0.x), r($0.y)] }] as [String: Any]
+                },
+            ]
         case let .storageState(st):
             var f: [String: Any] = ["project": st.project, "session": st.session, "location": st.location, "status": st.status,
                                     "saved_at_ms": st.savedAtMs, "projects": st.projects, "locations": st.locations, "revision": st.revision]
@@ -185,6 +200,25 @@ public enum MessageCodec {
             guard let pattern = CanvasBackground.Pattern(rawValue: try f.string("pattern")) else { throw ProtocolError.invalidField("pattern") }
             guard let color = RGBA(hex: try f.string("color")) else { throw ProtocolError.invalidField("color") }
             return .canvasBackground(CanvasBackground(mode: mode, color: color, pattern: pattern), revision: try f.uint64("revision"))
+        case "diagram.state":
+            var d = Diagram()
+            for raw in try f.array("nodes").prefix(maxIDsPerMessage) {
+                guard let o = raw as? [String: Any] else { throw ProtocolError.invalidField("nodes") }
+                let n = Fields(o)
+                guard let x = n.double("x"), let y = n.double("y"), let w = n.double("w"), let h = n.double("h"),
+                      w > 0, h > 0, coordinateRange.contains(x), coordinateRange.contains(y) else { throw ProtocolError.invalidField("nodes") }
+                d.nodes.append(DiagramNode(id: try n.string("id"), kind: try n.string("kind"), label: try n.labelString("label"),
+                                           frame: CGRect(x: x, y: y, width: w, height: h)))
+            }
+            for raw in try f.array("edges").prefix(maxIDsPerMessage) {
+                guard let o = raw as? [String: Any] else { throw ProtocolError.invalidField("edges") }
+                let e = Fields(o)
+                guard let kind = DiagramEdge.Kind(rawValue: try e.string("kind")),
+                      let style = DiagramEdge.Style(rawValue: try e.string("style")) else { throw ProtocolError.invalidField("edges") }
+                d.edges.append(DiagramEdge(id: try e.string("id"), from: try e.string("from"), to: try e.string("to"),
+                                           kind: kind, style: style, label: try e.labelString("label")))
+            }
+            return .diagramState(d, revision: try f.uint64("revision"))
         case "storage.state":
             let status = try f.string("status")
             guard ["empty", "saved", "saving", "unsaved", "failed"].contains(status) else { throw ProtocolError.invalidField("status") }
@@ -365,6 +399,14 @@ private struct Fields {
     func tool(_ key: String) throws -> Tool {
         guard let t = Tool(rawValue: try string(key)) else { throw ProtocolError.invalidField(key) }
         return t
+    }
+
+    /// Like `string` but allows "" (diagram labels are often empty).
+    func labelString(_ key: String) throws -> String {
+        guard let v = obj[key] else { throw ProtocolError.missingField(key) }
+        // 512 bytes: 120 characters of any script (Persian, CJK… take 2–4 bytes each).
+        guard let s = v as? String, s.utf8.count <= 512 else { throw ProtocolError.invalidField(key) }
+        return s
     }
 
     func stringArray(_ key: String) throws -> [String] {

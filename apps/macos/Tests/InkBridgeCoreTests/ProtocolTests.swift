@@ -4,7 +4,7 @@ import XCTest
 final class MessageCodecTests: XCTestCase {
     func testEveryValidFixtureDecodesAndRoundTrips() throws {
         let files = try Fixtures.files("valid")
-        XCTAssertEqual(files.count, 26)
+        XCTAssertEqual(files.count, 27)
         for url in files {
             let data = try Data(contentsOf: url)
             let message = try MessageCodec.decode(data)

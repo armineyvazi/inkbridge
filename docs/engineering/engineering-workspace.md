@@ -1,6 +1,21 @@
 # Engineering Workspace: research and plan
 
-**Status: planned. Nothing here is built yet.** The "Engineering" paper pattern is only a background, as you pointed out.
+**Status (2026-11-01): P2 foundation built and tested.** Remaining phases are below.
+
+## Built (P2)
+
+| Capability | Where | Verified |
+|---|---|---|
+| Diagram layer separate from ink and background: nodes + first-class connectors (references, not coordinates) | `InkBridgeCore/Engineering/Diagram.swift` | unit tests |
+| Component library: 46 components in 8 categories (application, infrastructure incl. Docker/K8s, data incl. PostgreSQL/MySQL/MongoDB/Redis/Elasticsearch, messaging incl. Kafka/RabbitMQ, network, people & C4, flowchart, notes), searchable | `ComponentCatalog` | unit tests |
+| Smart connectors: attach to facing sides, re-route when nodes move, **separate ports** when several share a side, straight/orthogonal/curved, 10 kinds (HTTP, gRPC, GraphQL, WebSocket, async, event, queue, database, data flow, dependency) with dashed/dotted conventions, labels, arrows | `ConnectorRouter`, `Diagram.path` | unit tests + rendered images |
+| Templates (editable objects): Microservices, Event-driven, Three-tier, CQRS, Flowchart | `DiagramTemplate` | unit tests (consistent references, no overlaps) + rendered images |
+| Editing on the Mac: select, ⇧-select, marquee, move (snap 10 px), resize handle, double-click rename, connect by dragging, inspector (label, details/columns, connector kind/route), align ×6, distribute ×2, duplicate, delete, nudge, ⌘A, V/C tools; every gesture one undo step | `InkCoordinator+Engineering`, `EngineeringPanel` | ⏳ by hand (needs real mouse) |
+| Persistence (`diagram.json` per session), export (PNG/JPEG/PDF composite and transparent annotations, `annotations/diagram.json`) | `SessionArchive` | unit tests (pixel check) + real app save, crash recovery |
+| Sync to the BOOX: `diagram.state` snapshot with routed paths; monochrome e-ink preview; Fit includes the diagram | protocol, `CanvasRenderer.drawDiagram` | **hardware: microservices template rendered on the Note Air over Wi-Fi** |
+
+**Not yet:** editing diagrams on the tablet (preview only); obstacle-avoiding routing (a connector can cross a node); sequence-diagram builder; ER relationships with cardinality notation; SQL import/export; code blocks; Mermaid; auto-layout; handwriting → components.
+
 
 ## What the best tools do, and what is worth adopting
 
@@ -40,6 +55,6 @@ Document
 
 | Phase | Deliverable | Acceptance |
 |---|---|---|
-| P2 | Diagram layer + selection/move/resize + component library (searchable, ~40 components) + smart connectors (straight/orthogonal) + alignment/snap + serialization + sync | Scenario A without templates: place services, DB, queue, LB; connect; move; connectors stay attached on both devices |
+| P2 ✅ | Diagram layer + selection/move/resize + component library (searchable, ~40 components) + smart connectors (straight/orthogonal) + alignment/snap + serialization + sync | Scenario A without templates: place services, DB, queue, LB; connect; move; connectors stay attached on both devices |
 | P3 | Templates (microservices, event-driven, CQRS…), C4 levels, sequence builder, ER editor + table editor, flowchart shapes, network/infra components | Scenarios A and B |
 | P4 | Code blocks (syntax highlighting), Mermaid render, SQL import/export, auto-layout, opt-in handwriting → components | Scenario C, B (SQL) |

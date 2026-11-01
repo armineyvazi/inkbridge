@@ -260,7 +260,7 @@ class CanvasActivity : InkActivity() {
     }
 
     private fun fitAll() {
-        applyViewport(Viewport.fitting(manager.document.contentBounds(), canvas.width, canvas.height), final = true, fromHost = false)
+        applyViewport(Viewport.fitting(manager.document.contentBoundsWithDiagram(), canvas.width, canvas.height), final = true, fromHost = false)
         if (manager.settings.cleanRefresh) cleanRefresh()
     }
 

@@ -138,6 +138,7 @@ class CanvasRenderer(private val document: CanvasDocument) {
         c.drawColor(bg.einkPaper)
         drawBackground(c, bg, v, bmp.width, bmp.height)
         dark = bg.isDark
+        drawDiagram(c, document.diagram, v)
         if (inkVisible) {
             val visible = Bounds(v.x, v.y, v.x + bmp.width / v.zoom, v.y + bmp.height / v.zoom)
             // Copy what is visible under the lock, draw outside it.
@@ -208,13 +209,110 @@ class CanvasRenderer(private val document: CanvasDocument) {
             each(y0, y1, p.minor) { y -> each(x0, x1, p.minor) { x -> c.drawCircle(v.toViewX(x), v.toViewY(y), 1.8f, patternPaint) } }
             return
         }
-        fun lines(step: Double, width: Float) {
+        fun lines(step: Double, width: Float, minGap: Double) {
+            if (step * v.zoom < minGap) return
             patternPaint.strokeWidth = width
             each(x0, x1, step) { x -> c.drawLine(v.toViewX(x), 0f, v.toViewX(x), h.toFloat(), patternPaint) }
             each(y0, y1, step) { y -> c.drawLine(0f, v.toViewY(y), w.toFloat(), v.toViewY(y), patternPaint) }
         }
-        lines(p.minor, 1f)
-        if (p.major > 0) lines(p.major, 2f)
+        if (p.major > 0) {
+            // Graph/engineering paper: on e-ink, minor lines only when zoomed in enough to be
+            // a guide (≥ 24 px apart) and faint; major lines carry the structure.
+            val major = patternPaint.color
+            patternPaint.color = if (bg.isDark) 0xFF383838.toInt() else 0xFFD0D0D0.toInt()
+            lines(p.minor, 1f, 24.0)
+            patternPaint.color = major
+            lines(p.major, 1.5f, 8.0)
+        } else {
+            lines(p.minor, 1f, 8.0)
+        }
+    }
+
+    private val diagramStroke = Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.STROKE; strokeJoin = Paint.Join.ROUND }
+    private val diagramFill = Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.FILL }
+    private val diagramText = Paint(Paint.ANTI_ALIAS_FLAG).apply { textAlign = Paint.Align.CENTER }
+
+    /**
+     * The Mac's diagram in monochrome: shapes filled with paper and outlined
+     * in ink, bold labels, the Mac's routed connectors (dashed for async and
+     * events) with an arrow at the target. Drawn under the ink, as on the Mac.
+     */
+    private fun drawDiagram(c: Canvas, d: app.inkbridge.core.canvas.DiagramSnapshot, v: Viewport) {
+        if (d.isEmpty) return
+        val ink = if (dark) Color.WHITE else Color.BLACK
+        val paper = if (dark) Color.BLACK else Color.WHITE
+        diagramStroke.color = ink
+        diagramText.color = ink
+        diagramStroke.strokeWidth = maxOf(1.5f, (1.6 * v.zoom).toFloat())
+        for (e in d.edges) {
+            if (e.points.size < 4) continue
+            val path = android.graphics.Path()
+            path.moveTo(v.toViewX(e.points[0]), v.toViewY(e.points[1]))
+            for (i in 2 until e.points.size step 2) path.lineTo(v.toViewX(e.points[i]), v.toViewY(e.points[i + 1]))
+            diagramStroke.pathEffect = if (e.dashed) android.graphics.DashPathEffect(floatArrayOf(10f, 7f), 0f) else null
+            c.drawPath(path, diagramStroke)
+            diagramStroke.pathEffect = null
+            val n = e.points.size
+            val ax = v.toViewX(e.points[n - 4]); val ay = v.toViewY(e.points[n - 3])
+            val bx = v.toViewX(e.points[n - 2]); val by = v.toViewY(e.points[n - 1])
+            val ang = Math.atan2((by - ay).toDouble(), (bx - ax).toDouble())
+            val len = 14f
+            val head = android.graphics.Path().apply {
+                moveTo(bx, by)
+                lineTo((bx - len * Math.cos(ang - 0.4)).toFloat(), (by - len * Math.sin(ang - 0.4)).toFloat())
+                lineTo((bx - len * Math.cos(ang + 0.4)).toFloat(), (by - len * Math.sin(ang + 0.4)).toFloat())
+                close()
+            }
+            diagramFill.color = ink
+            c.drawPath(head, diagramFill)
+            if (e.label.isNotEmpty()) {
+                diagramText.textSize = (11 * v.zoom).toFloat().coerceIn(14f, 26f)
+                diagramText.typeface = android.graphics.Typeface.DEFAULT
+                val mid = n / 4 * 2
+                c.drawText(e.label, v.toViewX(e.points[mid]), v.toViewY(e.points[mid + 1]) - 8, diagramText)
+            }
+        }
+        diagramText.typeface = android.graphics.Typeface.DEFAULT_BOLD
+        for (node in d.nodes) {
+            val r = android.graphics.RectF(v.toViewX(node.x), v.toViewY(node.y), v.toViewX(node.x + node.w), v.toViewY(node.y + node.h))
+            val shape = shapePath(node.shape, r, v.zoom.toFloat())
+            diagramFill.color = paper
+            c.drawPath(shape, diagramFill)
+            c.drawPath(shape, diagramStroke)
+            if (node.shape == "cylinder") {
+                val h = minOf(r.height() * 0.18f, 14f * v.zoom.toFloat())
+                c.drawOval(android.graphics.RectF(r.left, r.top, r.right, r.top + 2 * h), diagramStroke)
+            }
+            diagramText.textSize = (13 * v.zoom).toFloat().coerceIn(14f, 30f)
+            c.drawText(ellipsize(node.label, diagramText, r.width() - 8), r.centerX(), r.centerY() + diagramText.textSize / 3, diagramText)
+        }
+    }
+
+    private fun shapePath(shape: String, r: android.graphics.RectF, zoom: Float): android.graphics.Path = android.graphics.Path().apply {
+        val cw = android.graphics.Path.Direction.CW
+        when (shape) {
+            "box" -> addRect(r, cw)
+            "stadium", "queue" -> addRoundRect(r, r.height() / 2, r.height() / 2, cw)
+            "diamond" -> { moveTo(r.centerX(), r.top); lineTo(r.right, r.centerY()); lineTo(r.centerX(), r.bottom); lineTo(r.left, r.centerY()); close() }
+            "parallelogram" -> { val k = r.width() * 0.12f; moveTo(r.left + k, r.top); lineTo(r.right, r.top); lineTo(r.right - k, r.bottom); lineTo(r.left, r.bottom); close() }
+            "hexagon" -> { val k = r.width() * 0.2f; moveTo(r.left + k, r.top); lineTo(r.right - k, r.top); lineTo(r.right, r.centerY()); lineTo(r.right - k, r.bottom); lineTo(r.left + k, r.bottom); lineTo(r.left, r.centerY()); close() }
+            "cloud" -> addOval(r, cw)
+            "note" -> { val k = minOf(16f * zoom, r.width() * 0.12f); moveTo(r.left, r.top); lineTo(r.right - k, r.top); lineTo(r.right, r.top + k); lineTo(r.right, r.bottom); lineTo(r.left, r.bottom); close() }
+            "cylinder" -> {
+                val h = minOf(r.height() * 0.18f, 14f * zoom)
+                moveTo(r.left, r.top + h); lineTo(r.left, r.bottom - h)
+                quadTo(r.centerX(), r.bottom + h, r.right, r.bottom - h); lineTo(r.right, r.top + h)
+                quadTo(r.centerX(), r.top - h, r.left, r.top + h)
+            }
+            else -> { val k = minOf(10f * zoom, r.height() / 4); addRoundRect(r, k, k, cw) }
+        }
+    }
+
+    private fun ellipsize(s: String, p: Paint, max: Float): String {
+        if (max <= 0 || p.measureText(s) <= max) return s
+        var n = s.length
+        while (n > 1 && p.measureText(s, 0, n) + p.measureText("…") > max) n--
+        return s.take(n) + "…"
     }
 
     /** Copies the cache to the surface; [dirty] null means the whole surface. */

@@ -89,6 +89,8 @@ final class AppModel: ObservableObject {
     @Published var viewport: Viewport = .home
     /// What the Mac's mouse does over the drawing surface (the pen always draws).
     @Published var pointerMode: PointerMode = .pointer
+    /// Mirror of the Engineering workspace switch, for the toolbar.
+    @Published var engineeringActive = false
     /// Mirror of the document's background layer (the store is the source of truth).
     @Published var background: CanvasBackground = .overlay
     /// Colour Studio Canvas returns to when toggled on from the overlay.

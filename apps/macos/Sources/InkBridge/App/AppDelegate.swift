@@ -8,8 +8,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private let defaults = UserDefaults.standard
 
     func applicationDidFinishLaunching(_ notification: Notification) {
-        if CommandLine.arguments.contains("--self-test") {
+        let args = CommandLine.arguments
+        if args.contains("--self-test") {
             exit(SelfTest.run())
+        }
+        // Developer: render a template with the real renderer and icons, then exit.
+        if let i = args.firstIndex(of: "--render-template"), args.count > i + 2,
+           let t = DiagramTemplate(rawValue: args[i + 1]) {
+            exit(SelfTest.render(t, to: URL(fileURLWithPath: args[i + 2]), dark: args.contains("--dark")))
         }
         // A menu-bar utility: no Dock icon, never steals focus by launching.
         NSApp.setActivationPolicy(.accessory)
@@ -25,6 +31,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
         defaults.set(false, forKey: "cleanExit")
         menuBar = MenuBarController(coordinator: coordinator)
+        // Developer: open Engineering with a template, for end-to-end checks with the tablet.
+        if let i = CommandLine.arguments.firstIndex(of: "--demo-template"), CommandLine.arguments.count > i + 1,
+           let t = DiagramTemplate(rawValue: CommandLine.arguments[i + 1]) {
+            coordinator.setEngineering(true)
+            coordinator.insertTemplate(t)
+        }
         // First run (no tablet paired yet): show the pairing code right away instead of
         // making people find the menu-bar icon, which a MacBook notch can hide.
         if model.pairedDevices.isEmpty {

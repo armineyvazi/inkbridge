@@ -73,4 +73,18 @@ enum SelfTest {
         print(failures == 0 ? "SELF-TEST PASSED" : "SELF-TEST FAILED: \(failures)")
         return Int32(failures)
     }
+
+    /// Renders a template exactly as the overlay and exports do.
+    static func render(_ t: DiagramTemplate, to url: URL, dark: Bool) -> Int32 {
+        let d = t.build(center: CGPoint(x: 700, y: 450))
+        let mapper = CoordinateMapper(canvas: CGSize(width: 1400, height: 900), surface: CGSize(width: 1400, height: 900))
+        let bg = CanvasBackground.studio(dark ? CanvasBackground.black : CanvasBackground.white, pattern: .engineering)
+        SessionArchive.exportDiagram = d
+        SessionArchive.exportIcon = InkCoordinator.icon
+        defer { SessionArchive.exportDiagram = Diagram(); SessionArchive.exportIcon = nil }
+        guard let img = try? SessionArchive.renderImage([], mapper: mapper, background: nil, canvasBackground: bg, scale: 1),
+              (try? SessionArchive.writeImage(img, to: url, type: .png)) != nil else { return 1 }
+        print("rendered \(t.rawValue): \(d.nodes.count) components, \(d.edges.count) connectors → \(url.path)")
+        return 0
+    }
 }

@@ -116,8 +116,9 @@ public enum BackgroundRenderer {
             }
             ctx.strokePath()
         }
-        lines(step: spacing.minor, width: 1, alpha: 1)
-        if spacing.major > 0 { lines(step: spacing.major, width: 1.5, alpha: 1.8) }
+        // With major lines, minor lines are a faint guide so diagrams stay readable.
+        lines(step: spacing.minor, width: spacing.major > 0 ? 0.5 : 1, alpha: spacing.major > 0 ? 0.45 : 1)
+        if spacing.major > 0 { lines(step: spacing.major, width: 1, alpha: 1.6) }
     }
 
     private static func forEachLine(from a: Double, to b: Double, step: Double, _ body: (Double) -> Void) {
