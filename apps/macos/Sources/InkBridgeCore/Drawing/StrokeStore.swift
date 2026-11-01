@@ -64,6 +64,48 @@ public final class StrokeStore {
         diagramRevision += 1
     }
 
+    /// Everything that makes up the open document, including undo history.
+    /// Used to step into the Daily Journal and come back to exactly the same
+    /// state (strokes, background, diagram, undo/redo), not a reloaded copy.
+    public struct Snapshot {
+        let strokes: [Stroke]
+        let background: CanvasBackground
+        let diagram: Diagram
+        let undo: [Command]
+        let redo: [Command]
+    }
+
+    public func snapshot() -> Snapshot {
+        endAll()
+        return Snapshot(strokes: strokes, background: background, diagram: diagram, undo: undoStack, redo: redoStack)
+    }
+
+    public func restore(_ s: Snapshot) {
+        active.removeAll()
+        strokes = s.strokes
+        applyBackground(s.background)
+        diagram = s.diagram
+        diagramRevision += 1
+        undoStack = s.undo
+        redoStack = s.redo
+        revision += 1
+    }
+
+    /// Folds a further edit into the previous diagram undo step (typing a label
+    /// letter by letter is one step, not one per keystroke). Falls back to a new
+    /// step if the last command was something else.
+    public func amendDiagram(_ d: Diagram) {
+        guard d != diagram else { return }
+        if case let .diagram(from, _)? = undoStack.last {
+            undoStack[undoStack.count - 1] = .diagram(from: from, to: d)
+            redoStack.removeAll()
+            diagram = d
+            diagramRevision += 1
+        } else {
+            setDiagram(d)
+        }
+    }
+
     public func commitDiagram(_ d: Diagram, undoFrom start: Diagram) {
         diagram = d
         diagramRevision += 1

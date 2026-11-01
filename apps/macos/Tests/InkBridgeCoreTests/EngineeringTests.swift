@@ -97,6 +97,30 @@ final class EngineeringTests: XCTestCase {
         XCTAssertTrue(store.strokes.isEmpty)
     }
 
+    /// Regression: typing a label made one undo step per keystroke.
+    func testTypingALabelIsOneUndoStep() {
+        let store = StrokeStore()
+        store.setDiagram(Diagram(nodes: [node("a", 0, 0)]))
+        for label in ["O", "Or", "Ord", "Orders"] {
+            var d = store.diagram
+            d.nodes[0].label = label
+            store.amendDiagram(d)
+        }
+        XCTAssertEqual(store.diagram.nodes[0].label, "Orders")
+        store.undo()
+        XCTAssertTrue(store.diagram.isEmpty, "add + typing collapsed into the add step's successor… one undo removes the edit")
+    }
+
+    func testAmendAfterAStrokeStartsANewStep() {
+        let store = StrokeStore()
+        store.begin(id: "s", tool: .pen, style: StrokeStyle(color: .red, width: 2, pressureSensitive: false), point: InkPoint(x: 0, y: 0, p: 1, t: 0))
+        store.end(id: "s")
+        store.amendDiagram(Diagram(nodes: [node("a", 0, 0)]))
+        store.undo()
+        XCTAssertTrue(store.diagram.isEmpty)
+        XCTAssertEqual(store.strokes.count, 1, "the stroke was not folded into the diagram step")
+    }
+
     func testDiagramPersistsWithTheSessionAndOnTheWire() throws {
         let dir = FileManager.default.temporaryDirectory.appendingPathComponent("ib-diag-\(UUID().uuidString)")
         defer { try? FileManager.default.removeItem(at: dir) }

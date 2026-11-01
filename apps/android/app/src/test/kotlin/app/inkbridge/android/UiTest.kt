@@ -22,6 +22,7 @@ import app.inkbridge.core.protocol.Tool
 import app.inkbridge.core.protocol.InkPoint
 import app.inkbridge.core.protocol.WireStyle
 import app.inkbridge.core.canvas.CanvasBackground
+import app.inkbridge.core.protocol.JournalItem
 import app.inkbridge.core.protocol.Payload
 import app.inkbridge.android.features.storage.StorageActivity
 import app.inkbridge.core.protocol.StorageState
@@ -272,6 +273,49 @@ class UiTest {
         assertTrue(t.any { it.startsWith("Offline") }, "never claims the Mac's status while offline")
         assertFalse(app.connection.requestStorage("new_session"), "storage changes need the Mac")
         assertNull(app.connection.storageRequest.value)
+    }
+
+    @Test
+    fun journalPanelExplainsOfflineAndHeaderShowsTheOpenDay() {
+        val a = Robolectric.buildActivity(CanvasActivity::class.java).setup().get()
+        idle()
+        val root = a.window.decorView
+        root.byLabel("Daily Journal").performClick()
+        assertTrue(root.texts().any { it.contains("kept on your Mac") }, "offline: says where the journal lives and that drawing is kept")
+        assertFalse(app.connection.requestJournal("open"), "journal changes need the Mac")
+        app.connection.defaultHostHandler(Payload.Journal(true, "2026-11-01", true, "Sync ideas",
+            listOf(JournalItem("j1", "note", "Offline-first storage", false, 1_793_425_500_000)), 4))
+        idle()
+        assertTrue("Daily Journal · 2026-11-01 · Today" in root.texts(), root.texts().toString())
+    }
+
+    @Test
+    fun sentStrokesLeaveTheTabletWhenTheMacSwitchesDocuments() {
+        val doc = app.connection.document
+        val style = WireStyle(0, 2.0)
+        doc.applyLocal(StylusEvent.Begin("w1", Tool.PEN, InkPoint(1.0, 1.0, 1.0, 0)), style)
+        doc.applyLocal(StylusEvent.End("w1"), style)
+        doc.applyLocal(StylusEvent.Begin("w2", Tool.PEN, InkPoint(2.0, 2.0, 1.0, 0)), style)
+        doc.applyLocal(StylusEvent.End("w2"), style)
+        val sent = assertNotNull(app.connection.client.onStrokeSent, "the client must report sent strokes to the mirror")
+        sent("w1")  // w1 reached the Mac; w2 was drawn offline and is still waiting
+        doc.applyHost(Payload.DocReset)  // the Mac opened another document (journal, session, project)
+        assertEquals(listOf("w2"), doc.read { all -> all.map { it.id } }, "only unsent ink survives a switch")
+        assertEquals(1, doc.unsentCount)
+    }
+
+    @Test
+    fun journalAndStorageUpdatesArriveWhileTheCanvasIsOpen() {
+        val a = Robolectric.buildActivity(CanvasActivity::class.java).setup().get()
+        idle()
+        val handler = assertNotNull(app.connection.client.onHostPayload)
+        handler(Payload.Journal(true, "2026-11-01", true, "", emptyList(), 1))
+        idle()
+        assertTrue("Daily Journal · 2026-11-01 · Today" in a.window.decorView.texts())
+        handler(Payload.Journal(false, "2026-11-01", true, "", emptyList(), 2))  // the Mac closed the journal
+        idle()
+        assertTrue(a.window.decorView.texts().none { it.startsWith("Daily Journal ·") }, "header goes away when the Mac closes the journal")
+        assertEquals(false, app.connection.journal.value?.active)
     }
 
     @Test

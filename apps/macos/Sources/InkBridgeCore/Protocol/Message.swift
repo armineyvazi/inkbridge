@@ -176,6 +176,10 @@ public enum Payload: Equatable, Sendable {
     /// Host → device: the engineering diagram, with connector paths already routed
     /// (so the tablet draws exactly what the Mac draws). Whole snapshot: diagrams are small.
     case diagramState(Diagram, revision: UInt64)
+    /// Host → device: the Daily Journal (open or not, which day, its timestamped entries).
+    case journalState(active: Bool, day: String, today: Bool, title: String, entries: [JournalEntry], revision: UInt64)
+    /// Device → host: "open" | "close" | "today" | "prev" | "next" | "day" (name = yyyy-MM-dd) | "add_note" | "add_task".
+    case journalRequest(action: String, name: String?)
     /// Host → device: project, session, save status (sent on change and on connect).
     case storageState(StorageState)
     /// Device → host: "save_now" | "new_session" | "switch_project" | "create_project" | "use_location".
@@ -213,6 +217,8 @@ public enum Payload: Equatable, Sendable {
         case .canvasBackground: return "canvas.background"
         case .diagramState: return "diagram.state"
         case .storageState: return "storage.state"
+        case .journalState: return "journal.state"
+        case .journalRequest: return "journal.request"
         case .storageRequest: return "storage.request"
         case .canvasCommand: return "canvas.command"
         case .docReset: return "doc.reset"

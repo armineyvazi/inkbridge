@@ -23,10 +23,14 @@ final class InkCoordinator: NSObject {
     private(set) lazy var storage = StorageController(coordinator: self)
     private(set) lazy var storageWindow = StorageWindowController(coordinator: self)
     let engineering = EngineeringModel()
+    private(set) lazy var journal = JournalController(coordinator: self)
+    private(set) lazy var journalPanel = JournalPanelController(journal: journal)
+    private(set) lazy var journalHistory = JournalHistoryWindow(journal: journal)
     private(set) lazy var engineeringPanel = EngineeringPanelController(model: engineering, actions: self)
     var diagramDrag: DiagramDrag?
     var sentDiagramRevision: UInt64 = 0
     var lastDiagramSyncNs: Int64 = 0
+    var lastTextEdit: (id: String, at: Date)?
     let sessionStarted = Date()
     let log = Logger(subsystem: "app.inkbridge", category: "coordinator")
 
@@ -293,7 +297,10 @@ final class InkCoordinator: NSObject {
         overlayView.onPan = { [weak self] dx, dy in self?.pan(dx, dy) }
         overlayView.onZoom = { [weak self] f, p in self?.zoom(f, at: p) }
         overlayView.onKey = { [weak self] e in self?.handleKey(e) ?? false }
-        overlayView.drawUnderInk = { [weak self] ctx, mapper in self?.drawDiagram(ctx, mapper) }
+        overlayView.drawUnderInk = { [weak self] ctx, mapper in
+            self?.drawDiagram(ctx, mapper)
+            self?.journal.drawTimes(ctx, mapper)
+        }
         applyInteraction()
         overlayWindow?.orderFrontRegardless()
         updateEraserRadius()
@@ -341,6 +348,7 @@ final class InkCoordinator: NSObject {
         model.canUndo = store.canUndo
         model.canRedo = store.canRedo
         storage.documentChanged()
+        journal.documentChanged()
     }
 
     // MARK: Document sync (host → tablet)
@@ -356,6 +364,30 @@ final class InkCoordinator: NSObject {
     func sendStorageState() {
         guard let peer = activePeer else { return }
         server.send(.storageState(storage.state()), to: peer.id)
+    }
+
+    /// Puts back a document snapshotted in memory (leaving the journal): same
+    /// strokes, background, diagram, undo/redo, session and view.
+    func restoreSession(id: String, snapshot: StrokeStore.Snapshot, viewport: Viewport) {
+        store.restore(snapshot)
+        sessionID = id
+        server.setSessionID(id)
+        ingestor.viewport = viewport
+        engineering.selection = []
+        engineering.diagramVersion += 1
+        backgroundDidChange()
+        relayoutOverlay()
+        overlayView?.invalidateCache()
+        refreshEditState()
+        autosavedRevision = store.documentVersion
+        if let peer = activePeer {
+            sync.reset()
+            send(sync.resync(store.strokes), to: peer)
+            sentBackgroundRevision = nil
+            syncBackground()
+            server.send(.canvasViewport(viewport), to: peer.id)
+            syncDiagram(force: true)
+        }
     }
 
     /// Replaces the open document (new or opened session). The tablet gets a full resync.
@@ -498,6 +530,8 @@ extension InkCoordinator: InkServerDelegate {
             sync.markKnown(id)
         case let .storageRequest(action, name):
             storage.handle(action: action, name: name)
+        case let .journalRequest(action, name):
+            journal.handle(action: action, name: name)
         case let .canvasBackground(bg, _):
             // A request from the tablet. The Mac is the single writer: apply it (one undo
             // step), then echo the result with the new revision so both sides converge,
@@ -580,6 +614,7 @@ extension InkCoordinator: InkServerDelegate {
             syncBackground()
             server.send(.storageState(storage.state()), to: peer.id)
             syncDiagram(force: true)
+            journal.sendState()
         }
         relayoutOverlay()
     }

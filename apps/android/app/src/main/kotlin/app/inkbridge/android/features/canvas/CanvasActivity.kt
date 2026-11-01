@@ -76,13 +76,24 @@ class CanvasActivity : InkActivity() {
                 manager.document.applyLocal(e, LOCAL_STYLE)
             }
         }
+        // The canvas adds viewport handling; everything else (document, storage, journal…)
+        // goes through the shared handler. Regression: handling only document messages here
+        // dropped journal/storage updates while the canvas was open.
         manager.client.onHostPayload = { p ->
             if (p is Payload.CanvasViewport) runOnUiThread { applyViewport(p.viewport, final = true, fromHost = true) }
-            else manager.document.applyHost(p)
+            else manager.defaultHostHandler(p)
         }
         setContentView(FrameLayout(this).apply {
             setBackgroundColor(Ink.PAPER)
             addView(canvas, FrameLayout.LayoutParams(-1, -1))
+            journalHeader = Ink.text(this@CanvasActivity, "", Ink.CAPTION + 1, bold = true).apply {
+                background = Ink.box(context, Ink.PAPER, Ink.INK, radius = 16, strokeDp = 1)
+                setPadding(Ink.dp(context, 14), Ink.dp(context, 8), Ink.dp(context, 14), Ink.dp(context, 8))
+                visibility = View.GONE
+            }
+            addView(journalHeader, FrameLayout.LayoutParams(-2, -2, Gravity.TOP or Gravity.START).apply {
+                topMargin = Ink.dp(context, 14); marginStart = Ink.dp(context, 12)
+            })
             chipView = chip()
             // Bottom left: status stays readable without sharing the top edge with the tools.
             addView(chipView, FrameLayout.LayoutParams(-2, -2, Gravity.BOTTOM or Gravity.START).apply {
@@ -102,6 +113,9 @@ class CanvasActivity : InkActivity() {
         })
         hideSystemBars()
         observe(manager.status) { renderStatus(it) }
+        observe(kotlinx.coroutines.flow.combine(manager.journal, manager.client.state) { j, s -> j to (s is ClientState.Ready) }) { (j, c) ->
+            renderJournal(j, c)
+        }
     }
 
     override fun onDestroy() {
@@ -153,6 +167,7 @@ class CanvasActivity : InkActivity() {
         addView(Ink.iconButton(ctx, R.drawable.ic_zoom_in, "Zoom in", BAR) { zoomBy(1.5) })
         addView(Ink.iconButton(ctx, R.drawable.ic_fit, "Fit all ink", BAR) { fitAll() })
         addView(divider())
+        addView(Ink.iconButton(ctx, R.drawable.ic_book, "Daily Journal", BAR) { toggleJournalSheet() })
         addView(Ink.iconButton(ctx, R.drawable.ic_background, "Background", BAR) { toggleBackgroundSheet() })
         lateinit var more: View
         more = Ink.iconButton(ctx, R.drawable.ic_more, "More", BAR) { showMore(more) }
@@ -189,6 +204,31 @@ class CanvasActivity : InkActivity() {
         }
     }
 
+    // MARK: Daily Journal
+
+    private var journalSheet: JournalSheet? = null
+    private lateinit var journalHeader: TextView
+
+    private fun toggleJournalSheet() {
+        val root = canvas.parent as FrameLayout
+        journalSheet?.let { root.removeView(it); journalSheet = null; return }
+        sheet?.let { root.removeView(it); sheet = null }
+        val panel = JournalSheet(this, request = { a, n -> manager.requestJournal(a, n) }, onClose = ::toggleJournalSheet)
+        panel.render(manager.journal.value, manager.client.state.value is ClientState.Ready)
+        root.addView(panel, FrameLayout.LayoutParams(Ink.dp(this, 400), -2, Gravity.TOP or Gravity.END).apply {
+            topMargin = Ink.dp(this@CanvasActivity, 12 + BAR + 12); marginEnd = Ink.dp(this@CanvasActivity, 12)
+        })
+        journalSheet = panel
+    }
+
+    /** Header across the top while the journal is open: which day the ink goes to. */
+    private fun renderJournal(j: app.inkbridge.core.protocol.Payload.Journal?, connected: Boolean) {
+        val text = if (j?.active == true) "Daily Journal · ${j.day}" + (if (j.today) " · Today" else "") else ""
+        Ink.setText(journalHeader, text)
+        journalHeader.visibility = if (text.isEmpty()) View.GONE else View.VISIBLE
+        journalSheet?.render(j, connected)
+    }
+
     // MARK: Background
 
     private var sheet: View? = null
@@ -196,6 +236,7 @@ class CanvasActivity : InkActivity() {
     private fun toggleBackgroundSheet() {
         val root = canvas.parent as FrameLayout
         sheet?.let { root.removeView(it); sheet = null; return }
+        journalSheet?.let { root.removeView(it); journalSheet = null }
         val panel = BackgroundSheet(this, manager.document.background, onPick = ::setBackground, onClose = ::toggleBackgroundSheet)
         root.addView(panel, FrameLayout.LayoutParams(Ink.dp(this, 380), -2, Gravity.TOP or Gravity.END).apply {
             topMargin = Ink.dp(this@CanvasActivity, 12 + BAR + 12); marginEnd = Ink.dp(this@CanvasActivity, 12)

@@ -118,6 +118,15 @@ sealed interface Payload {
     data class Diagram(val diagram: app.inkbridge.core.canvas.DiagramSnapshot, val revision: Long) : Payload {
         override val type get() = "diagram.state"
     }
+    /** Host → device: the Daily Journal (open or not, which day, its timestamped entries). */
+    data class Journal(val active: Boolean, val day: String, val today: Boolean, val title: String,
+                       val entries: List<JournalItem>, val revision: Long) : Payload {
+        override val type get() = "journal.state"
+    }
+    /** Device → host: open, close, today, prev, next, day (name = yyyy-MM-dd), add_note, add_task. */
+    data class JournalRequest(val action: String, val name: String? = null) : Payload {
+        override val type get() = "journal.request"
+    }
     /** Host → device: what the Mac is saving to and how it is going (paths are display strings). */
     data class Storage(val state: StorageState) : Payload {
         override val type get() = "storage.state"
@@ -177,3 +186,6 @@ data class StorageState(
     val locations: List<String>,
     val revision: Long,
 )
+
+/** One journal entry as the tablet shows it; [createdMs] is UTC epoch ms. */
+data class JournalItem(val id: String, val kind: String, val text: String, val done: Boolean, val createdMs: Long)

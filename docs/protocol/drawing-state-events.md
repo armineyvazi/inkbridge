@@ -18,6 +18,14 @@ These are additive messages within protocol v3: older peers ignore unknown types
 
 The fixtures are `protocol/fixtures/valid/canvas.background.json` and `invalid/bad-background-mode.json`, and both test suites decode them.
 
+## Engineering and journal (built)
+
+| Message | Direction | Fields |
+|---|---|---|
+| `diagram.state` | H→D | `nodes[{id,kind,label,shape,x,y,w,h}]`, `edges[{id,from,to,kind,style,label,dashed,points[]}]`, `revision`. Paths are already routed; labels may be empty or up to 512 bytes |
+| `journal.state` | H→D | `active`, `day` (yyyy-MM-dd), `today`, `title`, `entries[{id,kind note/task/ink,text,done,created_ms UTC}]` (last 100), `revision` |
+| `journal.request` | D→H | `action` ∈ open, close, today, prev, next, day, add_note, add_task; `name?` (day id or text) |
+
 ## Planned (not implemented yet)
 
 | Message | Phase | Purpose |

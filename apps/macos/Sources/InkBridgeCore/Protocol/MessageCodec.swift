@@ -112,6 +112,16 @@ public enum MessageCodec {
                      "points": d.path(of: e).flatMap { [r($0.x), r($0.y)] }] as [String: Any]
                 },
             ]
+        case let .journalState(active, day, today, title, entries, revision):
+            return ["active": active, "day": day, "today": today, "title": title, "revision": revision,
+                    "entries": entries.suffix(100).map { e in
+                        ["id": e.id, "kind": e.kind.rawValue, "text": String(e.text.prefix(120)), "done": e.done,
+                         "created_ms": Int64(e.createdAt.timeIntervalSince1970 * 1000)] as [String: Any]
+                    }]
+        case let .journalRequest(action, name):
+            var f: [String: Any] = ["action": action]
+            if let name { f["name"] = name }
+            return f
         case let .storageState(st):
             var f: [String: Any] = ["project": st.project, "session": st.session, "location": st.location, "status": st.status,
                                     "saved_at_ms": st.savedAtMs, "projects": st.projects, "locations": st.locations, "revision": st.revision]
@@ -219,6 +229,24 @@ public enum MessageCodec {
                                            kind: kind, style: style, label: try e.labelString("label")))
             }
             return .diagramState(d, revision: try f.uint64("revision"))
+        case "journal.state":
+            var entries: [JournalEntry] = []
+            for raw in try f.array("entries").prefix(100) {
+                guard let o = raw as? [String: Any] else { throw ProtocolError.invalidField("entries") }
+                let e = Fields(o)
+                guard let kind = JournalEntry.Kind(rawValue: try e.string("kind")) else { throw ProtocolError.invalidField("entries") }
+                let created = Date(timeIntervalSince1970: Double(try e.int64("created_ms")) / 1000)
+                entries.append(JournalEntry(id: try e.string("id"), kind: kind, text: try e.labelString("text"),
+                                            done: try e.bool("done"), createdAt: created))
+            }
+            return .journalState(active: try f.bool("active"), day: try f.labelString("day"), today: try f.bool("today"),
+                                 title: try f.labelString("title"), entries: entries, revision: try f.uint64("revision"))
+        case "journal.request":
+            let action = try f.string("action")
+            guard ["open", "close", "today", "prev", "next", "day", "add_note", "add_task"].contains(action) else {
+                throw ProtocolError.invalidField("action")
+            }
+            return .journalRequest(action: action, name: try f.optionalString("name"))
         case "storage.state":
             let status = try f.string("status")
             guard ["empty", "saved", "saving", "unsaved", "failed"].contains(status) else { throw ProtocolError.invalidField("status") }

@@ -39,6 +39,10 @@ extension InkCoordinator: ToolbarActions {
     func showToolbar() { toolbar.setVisible(true) }
     var storageController: StorageController { storage }
     func showStorage() { storageWindow.show() }
+    func toggleJournal() {
+        _ = journalHistory  // registers the History opener
+        journal.toggle()
+    }
     func hideToolbar() { toolbar.setVisible(false) }
     func toggleToolbar() { toolbar.setVisible(!model.toolbarVisible) }
     var isToolbarVisible: Bool { model.toolbarVisible }
@@ -112,6 +116,7 @@ extension InkCoordinator: ToolbarActions {
         keys.register(kVK_ANSI_K) { [weak self] in self?.openConnectDevice() }
         keys.register(kVK_ANSI_B) { [weak self] in self?.toggleStudio() }
         keys.register(kVK_ANSI_J) { [weak self] in self?.storageWindow.show() }
+        keys.register(kVK_ANSI_N) { [weak self] in self?.toggleJournal() }
         keys.register(kVK_ANSI_G) { [weak self] in
             guard let self else { return }
             self.setEngineering(!self.engineering.active)
@@ -154,6 +159,10 @@ extension InkCoordinator: ToolbarActions {
     func restoreLastSession() -> Bool {
         guard let project = UserDefaults.standard.string(forKey: "lastSessionProject"),
               let id = UserDefaults.standard.string(forKey: "lastSessionID") else { return false }
+        if project == StorageController.journalMarker {
+            journal.open(day: id)
+            return journal.active
+        }
         return (try? storage.openSession(project: project, id: id)) != nil
     }
 }

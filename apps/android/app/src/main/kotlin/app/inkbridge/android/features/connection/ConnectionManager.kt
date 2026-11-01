@@ -110,6 +110,17 @@ class ConnectionManager(private val ctx: Context) {
         return true
     }
 
+    private val _journal = MutableStateFlow<app.inkbridge.core.protocol.Payload.Journal?>(null)
+    /** The Mac's Daily Journal state (open or not, which day, entries). */
+    val journal: StateFlow<app.inkbridge.core.protocol.Payload.Journal?> = _journal.asStateFlow()
+
+    /** Asks the Mac to act on the journal. Only while connected (the Mac owns it). */
+    fun requestJournal(action: String, name: String? = null): Boolean {
+        if (client.state.value !is ClientState.Ready) return false
+        client.submitJournalRequest(action, name)
+        return true
+    }
+
     /** Mirrors every host document message, whichever screen is showing. The canvas adds viewport handling. */
     val defaultHostHandler: (app.inkbridge.core.protocol.Payload) -> Unit = { p ->
         when (p) {
@@ -119,6 +130,7 @@ class ConnectionManager(private val ctx: Context) {
                 _storage.value = p.state
                 _storageRequest.value = null
             }
+            is app.inkbridge.core.protocol.Payload.Journal -> scope.launch { _journal.value = p }
             is app.inkbridge.core.protocol.Payload.CanvasViewport -> Unit
             else -> document.applyHost(p)
         }
@@ -128,6 +140,9 @@ class ConnectionManager(private val ctx: Context) {
         // Regression: this used to be set only by the canvas screen, so the Mac's resync on
         // connect (usually while Home is showing) was dropped and the canvas opened empty.
         client.onHostPayload = defaultHostHandler
+        // Regression: never wired after the redesign, so every tablet stroke stayed "pending"
+        // forever and survived the Mac's doc.reset (old ink showed up in the journal/other sessions).
+        client.onStrokeSent = document::markSent
         client.onPaired = { r -> scope.launch { onPaired(r) } }
         // Keep the client's Failed(NOT_PAIRED) state so the screen says why; only drop the stale secret.
         client.onUnpaired = { scope.launch { pairingStore.clear(); _paired.value = null } }

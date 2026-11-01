@@ -148,7 +148,7 @@ public enum DiagramRenderer {
     }
 
     /// Centred single-line text in a flipped (top-left) context.
-    static func text(_ s: String, at p: CGPoint, size: CGFloat, bold: Bool, color: CGColor, maxWidth: CGFloat, _ ctx: CGContext,
+    public static func text(_ s: String, at p: CGPoint, size: CGFloat, bold: Bool, color: CGColor, maxWidth: CGFloat, _ ctx: CGContext,
                      mono: Bool = false, plate: CGColor? = nil) {
         let font = CTFontCreateWithName((mono ? "Menlo" : (bold ? "Helvetica-Bold" : "Helvetica")) as CFString, size, nil)
         let attr = NSAttributedString(string: s, attributes: [kCTFontAttributeName as NSAttributedString.Key: font,

@@ -60,6 +60,9 @@ fun main(args: Array<String>): Unit = runBlocking(Dispatchers.Default) {
     val doc = app.inkbridge.core.canvas.CanvasDocument()
     client.onHostPayload = { p ->
         doc.applyHost(p)
+        if (p is app.inkbridge.core.protocol.Payload.Journal) {
+            println("journal from host: active=${p.active} day=${p.day} today=${p.today} entries=${p.entries.map { it.kind + ":" + it.text }}")
+        }
         if (p is app.inkbridge.core.protocol.Payload.Storage) {
             val st = p.state
             println("storage from host: project=${st.project} session=${st.session} status=${st.status} location=${st.location} projects=${st.projects} revision=${st.revision}${st.error?.let { " error=$it" } ?: ""}")
@@ -133,6 +136,17 @@ fun main(args: Array<String>): Unit = runBlocking(Dispatchers.Default) {
             }
             println("reconnected with ${if (pairing != null) "device token" else "no auth"} in %.0f ms".format((System.nanoTime() - t0) / 1e6))
         }
+    }
+    // --journal-flow: open today's journal, write one stroke and a note, close it again.
+    if ("--journal-flow" in opts) {
+        client.submitJournalRequest("open"); delay(2_000)
+        val sample = { x: Float, y: Float -> RawSample(x, y, 0.6f, System.nanoTime()) }
+        processor.process(PointerAction.DOWN, ToolKind.STYLUS, false, listOf(sample(300f, 300f))).forEach(client::submit)
+        for (k in 1..30) { processor.process(PointerAction.MOVE, ToolKind.STYLUS, false, listOf(sample(300f + k * 10, 300f + k * 3))).forEach(client::submit); delay(5) }
+        processor.process(PointerAction.UP, ToolKind.STYLUS, false, listOf(sample(600f, 390f))).forEach(client::submit)
+        delay(1_000)
+        client.submitJournalRequest("add_note", "Simulated thought from the tablet"); delay(1_000)
+        if ("--journal-stay" !in opts) { client.submitJournalRequest("close"); delay(2_000) }
     }
     delay(1_000) // let the queue drain and a final ping land
     println("done: dropped=${client.droppedEvents.get()} rtt=${client.rttMs.value?.let { "%.2f ms".format(it) } ?: "n/a"}")

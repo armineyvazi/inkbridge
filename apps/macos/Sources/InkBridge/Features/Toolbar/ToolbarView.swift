@@ -21,6 +21,7 @@ protocol ToolbarActions: AnyObject {
     var storageController: StorageController { get }
     func showStorage()
     func setEngineering(_ on: Bool)
+    func toggleJournal()
 }
 
 /// Save state at a glance; click for Projects & Storage.
@@ -77,6 +78,7 @@ struct ToolbarView: View {
 
     @ViewBuilder private var expanded: some View {
         if !vertical { StatusBadge(model: model); separator }
+        journalButton
         BackgroundButton(model: model, actions: actions)
         engineeringButton
         pointerToggle
@@ -99,6 +101,7 @@ struct ToolbarView: View {
 
     @ViewBuilder private var compact: some View {
         statusDot
+        journalButton
         BackgroundButton(model: model, actions: actions)
         engineeringButton
         pointerToggle
@@ -122,11 +125,25 @@ struct ToolbarView: View {
         .menuIndicator(.hidden)
         .fixedSize()
         .help("Tool")
+        journalButton
         BackgroundButton(model: model, actions: actions)
         iconButton("arrow.uturn.backward", "Undo (⌃⌥Z)", enabled: model.canUndo) { actions?.undo() }
     }
 
     // MARK: Pieces
+
+    /// Daily Journal: today's page, one click in and out (⌃⌥N).
+    private var journalButton: some View {
+        let on = model.journalActive
+        return Button { actions?.toggleJournal() } label: {
+            Image(systemName: on ? "book.fill" : "book")
+                .frame(width: 28, height: 26)
+                .background(on ? Color.accentColor.opacity(0.25) : .clear)
+                .clipShape(RoundedRectangle(cornerRadius: 6))
+        }
+        .buttonStyle(.plain)
+        .help(on ? "Close the journal and return to your work (⌃⌥N)" : "Daily Journal: capture a thought, then come back (⌃⌥N)")
+    }
 
     /// Engineering workspace: diagram components, connectors, templates (⌃⌥G).
     private var engineeringButton: some View {

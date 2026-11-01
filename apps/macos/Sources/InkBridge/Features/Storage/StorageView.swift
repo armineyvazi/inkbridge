@@ -14,7 +14,7 @@ final class StorageWindowController {
     func show() {
         coordinator.storage.refreshProjects()
         if window == nil {
-            let w = NSWindow(contentViewController: NSHostingController(rootView: StorageView(storage: coordinator.storage)))
+            let w = NSWindow(contentViewController: NSHostingController(rootView: StorageView(storage: coordinator.storage, journal: coordinator.journal)))
             w.title = "Projects & Storage"
             w.styleMask = [.titled, .closable, .resizable]
             w.isReleasedWhenClosed = false
@@ -48,6 +48,7 @@ struct SaveStatusLabel: View {
 
 struct StorageView: View {
     @ObservedObject var storage: StorageController
+    @ObservedObject var journal: JournalController
     @State private var query = ""
     @State private var sessionQuery = ""
     @State private var selected: String?
@@ -58,6 +59,8 @@ struct StorageView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
             location
+            Divider()
+            journalSection
             Divider()
             HStack(alignment: .top, spacing: 16) {
                 projectList.frame(width: 260)
@@ -113,6 +116,44 @@ struct StorageView: View {
                 Text(storage.freeBytes.map { ByteCountFormatter.string(fromByteCount: $0, countStyle: .file) + " free" } ?? "")
                     .foregroundStyle(.secondary)
             }
+        }
+    }
+
+    // MARK: Daily Journal (separate from projects)
+
+    private var journalSection: some View {
+        Grid(alignment: .leading, horizontalSpacing: 12, verticalSpacing: 8) {
+            GridRow {
+                Text("Daily Journal").foregroundStyle(.secondary)
+                Text(StorageController.displayPath(journal.rootPath)).lineLimit(1).truncationMode(.middle)
+                HStack {
+                    Button("Change…", action: changeJournalLocation)
+                    Button("Show in Finder") {
+                        try? FileManager.default.createDirectory(atPath: journal.rootPath, withIntermediateDirectories: true)
+                        NSWorkspace.shared.open(URL(fileURLWithPath: journal.rootPath))
+                    }
+                }
+            }
+            GridRow {
+                Text("Uses").foregroundStyle(.secondary)
+                Text("\(journal.store.days().count) days · \(ByteCountFormatter.string(fromByteCount: journal.store.usageBytes(), countStyle: .file))")
+                Text("Each day is its own folder (YYYY/MM/YYYY-MM-DD).").font(.caption).foregroundStyle(.secondary)
+            }
+        }
+    }
+
+    private func changeJournalLocation() {
+        guard let url = journal.pickFolder() else { return }
+        let alert = NSAlert()
+        alert.messageText = "Use “\(url.lastPathComponent)” for the Daily Journal?"
+        alert.informativeText = "Existing journal days are never moved or deleted. Copy them to the new folder too?"
+        alert.addButton(withTitle: "Copy Existing Days")
+        alert.addButton(withTitle: "Start Fresh There")
+        alert.addButton(withTitle: "Cancel")
+        switch alert.runModal() {
+        case .alertFirstButtonReturn: run { try journal.changeLocation(to: url, copyExisting: true) }
+        case .alertSecondButtonReturn: run { try journal.changeLocation(to: url, copyExisting: false) }
+        default: break
         }
     }
 

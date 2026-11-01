@@ -34,4 +34,17 @@ class DiagramTest {
         assertEquals("پرداخت سفارش", d.nodes[0].label)
         assertEquals("", d.edges[0].label)
     }
+
+    @Test
+    fun journalMessagesUseTheSharedFixtures() {
+        val j = MessageCodec.decode(Fixtures.bytes("valid/journal.state.json")).payload as Payload.Journal
+        assertEquals("2026-11-01", j.day)
+        assertEquals(listOf("note", "ink"), j.entries.map { it.kind })
+        assertEquals(1_793_425_500_000, j.entries[0].createdMs, "UTC epoch ms preserved")
+        val r = MessageCodec.decode(Fixtures.bytes("valid/journal.request.json")).payload as Payload.JournalRequest
+        assertEquals("day" to "2026-10-31", r.action to r.name)
+        kotlin.test.assertFailsWith<app.inkbridge.core.protocol.ProtocolException> {
+            MessageCodec.decode(Fixtures.bytes("invalid/bad-journal-action.json"))
+        }
+    }
 }

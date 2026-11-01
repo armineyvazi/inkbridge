@@ -219,6 +219,11 @@ class InkBridgeClient(
         if (outbox.trySend(Payload.Background(bg, knownRevision)).isFailure) droppedEvents.incrementAndGet()
     }
 
+    /** Asks the Mac to open/close/navigate the Daily Journal or add an entry. */
+    fun submitJournalRequest(action: String, name: String? = null) {
+        if (outbox.trySend(Payload.JournalRequest(action, name)).isFailure) droppedEvents.incrementAndGet()
+    }
+
     /** Asks the Mac to act on storage (save_now, new_session, switch_project, create_project, use_location). */
     fun submitStorageRequest(action: String, name: String? = null) {
         if (outbox.trySend(Payload.StorageRequest(action, name)).isFailure) droppedEvents.incrementAndGet()
@@ -427,7 +432,7 @@ class InkBridgeClient(
                 onHostPayload?.invoke(p)
             }
             is Payload.StrokeBegin, is Payload.StrokePoints, is Payload.StrokeEnd, is Payload.StrokeStyle,
-            is Payload.DocReset, is Payload.DocRemove, is Payload.Background, is Payload.Storage, is Payload.Diagram -> onHostPayload?.invoke(p)
+            is Payload.DocReset, is Payload.DocRemove, is Payload.Background, is Payload.Storage, is Payload.Diagram, is Payload.Journal -> onHostPayload?.invoke(p)
             else -> Unit
         }
     }

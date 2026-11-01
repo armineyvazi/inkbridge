@@ -110,6 +110,21 @@ object MessageCodec {
                 }
             },
         )
+        is Payload.Journal -> mapOf(
+            "active" to JsonPrimitive(p.active), "day" to JsonPrimitive(p.day), "today" to JsonPrimitive(p.today),
+            "title" to JsonPrimitive(p.title), "revision" to JsonPrimitive(p.revision),
+            "entries" to buildJsonArray {
+                p.entries.forEach { e ->
+                    add(buildJsonObject {
+                        put("id", e.id); put("kind", e.kind); put("text", e.text); put("done", e.done); put("created_ms", e.createdMs)
+                    })
+                }
+            },
+        )
+        is Payload.JournalRequest -> buildMap {
+            put("action", JsonPrimitive(p.action))
+            p.name?.let { put("name", JsonPrimitive(it)) }
+        }
         is Payload.Storage -> buildMap {
             val st = p.state
             put("project", JsonPrimitive(st.project)); put("session", JsonPrimitive(st.session))
@@ -213,6 +228,21 @@ object MessageCodec {
             f.nonNegativeLong("revision"),
         )
         "diagram.state" -> Payload.Diagram(diagram(f), f.nonNegativeLong("revision"))
+        "journal.state" -> Payload.Journal(
+            f.bool("active"), f.label("day"), f.bool("today"), f.label("title"),
+            f.array("entries").take(100).map { e ->
+                val o = Fields(e as? JsonObject ?: throw ProtocolException("invalid field entries"))
+                val kind = o.string("kind").also { if (it !in setOf("note", "task", "ink")) throw ProtocolException("invalid field entries") }
+                JournalItem(o.string("id"), kind, o.label("text"), o.bool("done"), o.long("created_ms"))
+            },
+            f.nonNegativeLong("revision"),
+        )
+        "journal.request" -> Payload.JournalRequest(
+            f.string("action").also {
+                if (it !in setOf("open", "close", "today", "prev", "next", "day", "add_note", "add_task")) throw ProtocolException("invalid field action")
+            },
+            f.optionalString("name"),
+        )
         "storage.state" -> Payload.Storage(StorageState(
             f.string("project"), f.string("session"), f.string("location"),
             f.string("status").also { if (it !in setOf("empty", "saved", "saving", "unsaved", "failed")) throw ProtocolException("invalid field status") },

@@ -54,6 +54,7 @@ extension InkCoordinator: EngineeringActions {
     }
 
     func updateNode(_ id: String, label: String?, detail: String?) {
+        let coalesce = isContinuingTextEdit(id)
         var d = store.diagram
         guard let i = d.nodes.firstIndex(where: { $0.id == id }) else { return }
         if let label { d.nodes[i].label = String(label.prefix(120)) }
@@ -63,16 +64,33 @@ extension InkCoordinator: EngineeringActions {
             let lines = CGFloat(d.nodes[i].detail.split(separator: "\n").count)
             d.nodes[i].frame.size.height = max(d.nodes[i].component.size.height, 40 + lines * 16)
         }
-        commitDiagram(d)
+        commitTextEdit(d, coalesce: coalesce)
+    }
+
+    /// Keystrokes on the same object within 2 s form one undo step.
+    private func isContinuingTextEdit(_ id: String) -> Bool {
+        let now = Date()
+        defer { lastTextEdit = (id, now) }
+        guard let last = lastTextEdit else { return false }
+        return last.id == id && now.timeIntervalSince(last.at) < 2
+    }
+
+    private func commitTextEdit(_ d: Diagram, coalesce: Bool) {
+        if coalesce { store.amendDiagram(d) } else { store.setDiagram(d) }
+        engineering.diagramVersion += 1
+        overlayView?.needsDisplay = true
+        refreshEditState()
+        syncDiagram(force: false)  // throttled while typing
     }
 
     func updateEdge(_ id: String, label: String?, kind: DiagramEdge.Kind?, style: DiagramEdge.Style?) {
+        let coalesce = label != nil && kind == nil && style == nil && isContinuingTextEdit(id)
         var d = store.diagram
         guard let i = d.edges.firstIndex(where: { $0.id == id }) else { return }
         if let label { d.edges[i].label = String(label.prefix(120)) }
         if let kind { d.edges[i].kind = kind }
         if let style { d.edges[i].style = style }
-        commitDiagram(d)
+        if label != nil && kind == nil && style == nil { commitTextEdit(d, coalesce: coalesce) } else { commitDiagram(d) }
     }
 
     func align(_ a: DiagramEditing.Alignment) {
@@ -269,6 +287,9 @@ extension InkCoordinator: EngineeringActions {
         case (9, false): engineering.tool = .select
         case (8, false): engineering.tool = .connect
         case (53, false) where !engineering.selection.isEmpty: engineering.selection = []; overlayView.needsDisplay = true
+        // Esc with nothing selected leaves Engineering as a whole (the canvas stays a studio surface),
+        // instead of dropping to the overlay while Engineering is still on.
+        case (53, false): setEngineering(false)
         case (123, false): nudge(-step, 0)
         case (124, false): nudge(step, 0)
         case (125, false): nudge(0, step)

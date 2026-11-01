@@ -22,10 +22,30 @@ final class StorageController: ObservableObject {
     private var savedVersion = -1
     private var revision: UInt64 = 0
     private static let configKey = "storageConfig"
+    static let journalMarker = "__journal__"
 
     var projectStore: ProjectStore { ProjectStore(root: URL(fileURLWithPath: config.rootPath)) }
     var activeProject: String { config.activeProject }
-    var sessionDir: URL { projectStore.sessionDir(config.activeProject, coordinator.sessionID) }
+    /// Set while the Daily Journal is open: saves go to that day's folder instead of the project.
+    var journalDir: URL?
+
+    var sessionDir: URL { journalDir ?? projectStore.sessionDir(config.activeProject, coordinator.sessionID) }
+
+    /// The journal day was just loaded into the canvas: it is what is on disk.
+    func enterJournal(title: String) {
+        sessionTitle = title
+        savedVersion = coordinator.store.documentVersion
+        setStatus(FileManager.default.fileExists(atPath: sessionDir.appendingPathComponent("strokes.json").path) ? .saved(Date()) : .empty)
+    }
+
+    /// Back from the journal: the restored document was saved before entering.
+    func restore(project: String, title: String) {
+        config.activeProject = project
+        sessionTitle = title
+        savedVersion = coordinator.store.documentVersion
+        setStatus(.saved(Date()))
+        coordinator.sendStorageState()
+    }
 
     init(coordinator: InkCoordinator) {
         self.coordinator = coordinator
@@ -108,6 +128,8 @@ final class StorageController: ObservableObject {
         let dir = sessionDir
         let project = config.activeProject
         let sessionID = coordinator.sessionID
+        let isJournal = journalDir != nil
+        let journalDay = journalDir?.lastPathComponent ?? ""
         ioQueue.async { [weak self] in
             let result: Result<Void, StorageError>
             do {
@@ -122,8 +144,9 @@ final class StorageController: ObservableObject {
                 switch result {
                 case .success:
                     self.savedVersion = version
-                    UserDefaults.standard.set(project, forKey: "lastSessionProject")
-                    UserDefaults.standard.set(sessionID, forKey: "lastSessionID")
+                    // Crash recovery reopens what was being written: a journal day or a project session.
+                    UserDefaults.standard.set(isJournal ? Self.journalMarker : project, forKey: "lastSessionProject")
+                    UserDefaults.standard.set(isJournal ? journalDay : sessionID, forKey: "lastSessionID")
                     self.setStatus(self.coordinator.store.documentVersion == version ? .saved(Date()) : .unsaved)
                 case .failure(let e):
                     self.setStatus(.failed(e.localizedDescription))
@@ -278,8 +301,9 @@ final class StorageController: ObservableObject {
         var error: String?
         if case .failed(let m) = status { error = String(m.prefix(120)) }
         return StorageState(
-            project: String(config.activeProject.prefix(120)), session: String(sessionTitle.prefix(120)),
-            location: Self.displayPath(projectStore.projectDir(config.activeProject).path),
+            project: journalDir == nil ? String(config.activeProject.prefix(120)) : "Daily Journal",
+            session: String(sessionTitle.prefix(120)),
+            location: Self.displayPath((journalDir ?? projectStore.projectDir(config.activeProject)).path),
             status: status.wire, savedAtMs: savedAt, error: error,
             projects: projects.prefix(100).map { String($0.name.prefix(120)) },
             locations: config.recentRoots.prefix(6).map(Self.displayPath), revision: revision)
