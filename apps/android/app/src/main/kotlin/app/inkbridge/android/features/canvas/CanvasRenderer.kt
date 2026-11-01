@@ -175,6 +175,13 @@ class CanvasRenderer(private val document: CanvasDocument) {
         post(h, null)
     }
 
+    /** Every 200 frames: the latency summary to logcat (`adb logcat -s InkBridge`). */
+    private fun logPerf() {
+        if (frameTime.size % 200 != 0) return
+        android.util.Log.i("InkBridge", "perf ink(sample→posted) ${inkLatency.summary()} · frame ${frameTime.summary()}" +
+            " · draw ${drawTime.summary()} · lock ${lockTime.summary()} · copy+post ${postTime.summary()}")
+    }
+
     /** Ink drawn into the cache but outside the last locked region; posted next frame. */
     private val carry = Rect()
 
@@ -216,6 +223,7 @@ class CanvasRenderer(private val document: CanvasDocument) {
             val end = System.nanoTime()
             frameTime.add((end - start) / 1e6)
             if (oldest != Long.MAX_VALUE && oldest > 0) inkLatency.add((end - oldest) / 1e6)
+            logPerf()
             return
         }
         val margin = LOCK_MARGIN_PX
@@ -242,10 +250,7 @@ class CanvasRenderer(private val document: CanvasDocument) {
             // Sample times are MotionEvent times (CLOCK_MONOTONIC), the same clock as nanoTime.
             // The oldest new sample in the frame: the worst latency it contains.
             if (oldest != Long.MAX_VALUE && oldest > 0) inkLatency.add((end - oldest) / 1e6)
-            if (frameTime.size % 200 == 0) {
-                android.util.Log.i("InkBridge", "perf ink(sample→posted) ${inkLatency.summary()} · frame ${frameTime.summary()}" +
-                    " · draw ${drawTime.summary()} · lock ${lockTime.summary()} · copy+post ${postTime.summary()}")
-            }
+            logPerf()
         }
     }
 

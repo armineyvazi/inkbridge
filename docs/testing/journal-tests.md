@@ -35,5 +35,6 @@
 | Panel design review (light/dark, empty state) | `InkBridge --render-journal DIR [--dark]` | ✅ reviewed; fixed wrapped times and preview sizing |
 | Tablet sheet design review | `make -C apps/android screenshots` → `7-journal.png` | ✅ reviewed; removed a duplicate button |
 | **BOOX:** latency, online vs Wi-Fi off | on-device recorders | ✅ identical (30.3 vs 29.7 ms p50) |
-| **BOOX:** lock-then-drain A/B | `inkrun.sh 1` vs `0` | ⏳ tablet PIN-locked during the session |
+| **BOOX:** lock-then-drain A/B | `inkrun.sh 1` vs `0`, 2 rounds | ✅ p50 48.3 → 28.2 ms, p95 60 → 40 ms; ink complete |
+| **BOOX:** redesigned journal sheet on hardware, Done from the tablet | adb | ✅ renders as designed; Done closed the Mac journal and returned to the work session |
 | Mac panel/history by real clicks | — | ⏳ no Accessibility permission here |

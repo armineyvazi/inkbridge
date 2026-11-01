@@ -46,18 +46,23 @@ Incremental saving (`IncrementalSave`):
 - **When it writes everything:** undo, erase, background or diagram changes, and logs over 400 strokes cause a full write. A full write also folds the log in.
 - **Loading:** replays the log in order, skips duplicates (a retried save), and skips a torn last line (a crash mid-append). Tests in `IncrementalSaveTests`.
 
-### BOOX: frame ordering (pending a measurement on hardware)
+### BOOX: frame ordering (measured 2026-11-02)
 
 Samples that arrived while the render thread waited ~20 ms for a frame used to miss that frame. Now:
 1. The region around the new ink is locked with a 96 px margin.
 2. Samples that arrived during the wait are drawn before posting.
 3. Ink outside the margin is carried to the next frame.
 
-The old order is still available for A/B measurement with
-`adb shell setprop debug.inkbridge.legacyframe 1`.
+The A/B switch is `adb shell setprop debug.inkbridge.legacyframe 1|0`. Each run was 60 strokes and 600 frames, two rounds each, measuring the **oldest** new sample in each frame (the worst case the frame contains):
 
-**Not yet measured on the tablet:** the tablet locked with a PIN during this work, and I don't enter PINs.
-Run `scratchpad/inkrun.sh 1` and then `inkrun.sh 0` (see Testing) to compare.
+| Stylus sample → frame posted | p50 | p95 | p99 |
+|---|---|---|---|
+| Old order | 48.3 ms | 60.1 ms | 65.5–69.5 ms |
+| **New order (default)** | **28.2 ms** | **39.8–40.9 ms** | **46 ms** |
+
+That's about 20 ms faster, almost one 40 Hz panel frame. Frame cost is unchanged (23 ms p50, dominated by the panel). A screenshot after the run shows every stroke complete.
+
+(The earlier "30 ms" baseline measured the *newest* sample in each frame, which hides the wait. From here on, the oldest sample is reported.)
 
 ### Tried and reverted
 
@@ -84,7 +89,7 @@ This is a candidate for an opt-in "fast ink (BOOX)" setting, tested on the Note 
 
 | Target | Result |
 |---|---|
-| Local input → visible ink ≤ 16 ms p95 | **Not achievable on this BOOX via Android**: the panel is 40 Hz. App share ≈ 4 ms/frame; sample → posted p95 ≈ 44 ms. Mac render path ≤ 0.2 ms/frame |
+| Local input → visible ink ≤ 16 ms p95 | **Not achievable on this BOOX via Android**: the panel is 40 Hz. App share ≈ 4 ms/frame; sample → posted p95 60 → **40 ms** (frame ordering). Mac render path ≤ 0.2 ms/frame |
 | Frame time ≤ 16.7 ms p95 | Mac: < 1 ms of drawing per frame. BOOX: bounded by the 25 ms panel frame |
 | No avoidable main-thread blocking | Journal page save (82 ms) moved off the main thread; saves are background, appends are sub-millisecond |
 | Zero network dependency for local ink | **Verified on hardware** (Wi-Fi off: same latency) |
