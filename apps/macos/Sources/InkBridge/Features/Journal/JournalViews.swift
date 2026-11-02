@@ -7,8 +7,8 @@ import SwiftUI
 /// The journal's side panel. The page itself (the canvas) is the writing surface;
 /// the panel stays narrow and holds only navigation, the day's timeline and quick capture.
 ///
-/// Closing the panel (red button, ⌘W) *hides* the journal; it does not leave it.
-/// The window keeps its SwiftUI state (scroll position, draft text) while hidden.
+/// Closing the panel (red button, ⌘W) leaves the journal and restores the previous
+/// workspace (same as Done / Esc / ⌃⌥N).
 final class JournalPanelController: NSObject, NSWindowDelegate {
   private var panel: NSPanel?
   private let journal: JournalController
@@ -67,9 +67,9 @@ final class JournalPanelController: NSObject, NSWindowDelegate {
     show(on: screen)
   }
 
-  /// The close button puts the journal away (it stays open; ⌃⌥N or 📖 brings it back).
+  /// The close button leaves the journal and restores the previous workspace.
   func windowShouldClose(_ sender: NSWindow) -> Bool {
-    journal.hide()
+    journal.close()
     return false
   }
 }
@@ -148,7 +148,6 @@ struct JournalPanelView: View {
         Toggle("Show Times on the Page", isOn: $journal.showTimes)
         Button("History and Search…") { journal.coordinatorHistory() }
         Divider()
-        Button("Hide Journal") { journal.hide() }
         Button("Done — Back to My Work") { journal.close() }
       } label: {
         Image(systemName: "ellipsis.circle")
@@ -562,6 +561,7 @@ struct JournalHistoryView: View {
       detail.frame(maxWidth: .infinity, maxHeight: .infinity)
     }
     .frame(minWidth: 720, minHeight: 460)
+    .onAppear { model.reload(journal.store) }
     // The open page may have changed (new entries): refresh the index.
     .onChange(of: journal.page) { _ in model.reload(journal.store) }
   }
@@ -774,11 +774,11 @@ struct JournalHistoryView: View {
           if !page.title.isEmpty { Text(page.title).font(.title3).foregroundStyle(.secondary) }
         }
         Spacer()
-        Button(isOpen && !journal.hidden ? "Open Now" : "Open in Journal") {
+        Button(isOpen ? "Open Now" : "Open in Journal") {
           journal.open(day: selected)
         }
         .buttonStyle(.borderedProminent)
-        .disabled(isOpen && !journal.hidden)
+        .disabled(isOpen)
       }
       .padding(.horizontal, 24)
       .padding(.top, 34)

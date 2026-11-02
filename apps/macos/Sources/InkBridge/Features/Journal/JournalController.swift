@@ -1,6 +1,7 @@
 import AppKit
 import Combine
 import InkBridgeCore
+import OSLog
 
 /// Daily Journal: a per-day notebook you can step into and out of without
 /// disturbing the open work.
@@ -8,15 +9,24 @@ import InkBridgeCore
 /// Entering: the current document is saved, then snapshotted *in memory*
 /// (strokes, background, diagram, undo/redo — `StrokeStore.snapshot`) along
 /// with the view, tool, mouse mode and Engineering state. The day's page is
-/// loaded into the same canvas. Leaving: the day is saved and the snapshot is
-/// restored exactly; nothing is reloaded from disk.
+/// loaded into the same canvas. Leaving (Done / Esc / Hide / ⌃⌥N toggle): the
+/// day is saved and the snapshot is restored exactly; nothing is reloaded from
+/// disk.
+///
+/// The canvas is always forced on-screen while the journal is active so tablet
+/// ink is visible on the Mac. A previous "put away" mode ordered the canvas out
+/// while still routing strokes into the day folder — writing looked broken.
 ///
 /// Days follow local calendar boundaries: a timer for the next local midnight
 /// plus `NSCalendarDayChanged` (time-zone change, wake from sleep) move an
 /// open "today" journal to the new day; older days stay as they were.
 final class JournalController: ObservableObject {
+  private static let log = Logger(subsystem: "app.inkbridge.mac", category: "journal")
+
   @Published private(set) var active = false
-  /// Open but put away: canvas and panel hidden, journal still loaded, saving and sync continue.
+  /// Legacy flag kept for the wire protocol (`journal.state.hidden`). Always false:
+  /// leaving the journal restores the previous workspace instead of ordering the
+  /// canvas out while still owning the day folder.
   @Published private(set) var hidden = false
   @Published private(set) var day = JournalCalendar.dayID(for: Date())
   @Published var page = JournalPage(day: JournalCalendar.dayID(for: Date()))
@@ -73,35 +83,28 @@ final class JournalController: ObservableObject {
 
   // MARK: Open / close
 
-  /// The 📖 button and ⌃⌥N: open → put away → bring back. "Done" leaves the journal.
+  /// The 📖 button and ⌃⌥N: open today's journal, or leave it and restore the previous workspace.
   func toggle() {
-    if !active { open() } else if hidden { show() } else { hide() }
+    if active { close() } else { open() }
   }
 
-  /// Puts the journal away so the desktop can be used, without leaving it: the day,
-  /// ink, entries, view, tool, panel (scroll, draft text) all stay in memory. A save is
-  /// started (not awaited); autosave and tablet sync keep running while hidden.
-  func hide() {
-    guard active, !hidden else { return }
-    let c = coordinator
-    hidden = true
-    c.model.journalHidden = true
-    savePage()
-    c.storage.save()
-    c.journalPanel.hide()
-    c.setCanvasHidden(true)
-    sendState()
-  }
+  /// Leaves the journal and restores the previous workspace (same as Done).
+  ///
+  /// Historically this ordered the canvas out while keeping the day folder as the
+  /// save target ("put away"). That made BOOX writing look broken on the Mac and
+  /// prevented returning to the prior workspace. Hide / Esc / tablet "Hide on Mac"
+  /// all leave now.
+  func hide() { close() }
 
-  /// Brings a put-away journal back exactly as it was.
+  /// Re-opens the journal if it was left (tablet "Show on Mac" after a leave).
   func show() {
-    guard active, hidden else { return }
-    let c = coordinator
-    hidden = false
-    c.model.journalHidden = false
-    c.setCanvasHidden(false)
-    c.journalPanel.show(on: c.targetScreen)
-    sendState()
+    if active {
+      ensureCanvasOnScreen()
+      coordinator.journalPanel.show(on: coordinator.targetScreen)
+      sendState()
+    } else {
+      open()
+    }
   }
 
   /// Opens a day (today by default). Asks once where journal files should live.
@@ -112,13 +115,14 @@ final class JournalController: ObservableObject {
     let target = requested ?? JournalCalendar.dayID(for: Date())
     guard JournalCalendar.isValid(target) else { return }
     if active {
-      if hidden { show() }
+      ensureCanvasOnScreen()
       return switchDay(to: target)
     }
     let c = coordinator
     do { try c.storage.saveNow() } catch {
       // The open work could not be saved: do not replace it.
       c.model.statusMessage = "Daily Journal not opened: \(error.localizedDescription)"
+      Self.log.error("open refused: save failed \(error.localizedDescription, privacy: .public)")
       return
     }
     saved = Saved(
@@ -128,23 +132,27 @@ final class JournalController: ObservableObject {
       pointer: c.model.pointerMode, engineering: c.engineering.active)
     if c.engineering.active { c.setEngineering(false) }
     active = true
+    hidden = false
     c.model.journalActive = true
+    c.model.journalHidden = false
     load(target)
+    ensureCanvasOnScreen()
     c.journalPanel.show(on: c.targetScreen)
     scheduleMidnight()
+    Self.log.info(
+      "opened day=\(target, privacy: .public) session=\(c.sessionID, privacy: .public) strokes=\(c.store.strokes.count)"
+    )
   }
 
   func close() {
     guard active, let s = saved else { return }
     let c = coordinator
+    let leaving = day
     savePage()
     flushPage()
     try? c.storage.saveNow()
-    if hidden {
-      hidden = false
-      c.model.journalHidden = false
-      c.setCanvasHidden(false)
-    }
+    hidden = false
+    c.model.journalHidden = false
     active = false
     c.model.journalActive = false
     midnightTimer?.invalidate()
@@ -163,8 +171,28 @@ final class JournalController: ObservableObject {
     c.setPointerMode(s.pointer)
     // Always restore: Engineering left on inside the journal must turn off with Done.
     c.setEngineering(s.engineering)
+    ensureCanvasOnScreen()
     saved = nil
     sendState()
+    Self.log.info(
+      "closed day=\(leaving, privacy: .public) restoredSession=\(s.sessionID, privacy: .public)"
+    )
+  }
+
+  /// Forces the drawing window on-screen and redraws. Journal open/show must call this:
+  /// "Hide ink" (⌃⌥O) or a previous put-away can leave the window ordered out while the
+  /// panel is visible, so tablet strokes update the store but never appear.
+  private func ensureCanvasOnScreen() {
+    let c = coordinator
+    c.cancelGestures()
+    if !c.model.overlayVisible {
+      c.model.overlayVisible = true
+    }
+    c.setCanvasHidden(false)
+    c.applyInteraction()
+    c.overlayView?.isHidden = false
+    c.overlayView?.invalidateCache()
+    c.overlayView?.needsDisplay = true
   }
 
   func switchDay(to target: String) {
@@ -189,20 +217,37 @@ final class JournalController: ObservableObject {
     var bg = Self.paper
     var viewport = Viewport.home
     var started = Date()
-    if let (meta, s) = try? SessionArchive.load(from: dir) {
-      strokes = s
-      bg = meta.background ?? Self.paper
-      viewport = meta.viewport
-      started = meta.startedAt
+    let sessionURL = dir.appendingPathComponent("session.json")
+    if FileManager.default.fileExists(atPath: sessionURL.path) {
+      do {
+        let (meta, s) = try SessionArchive.load(from: dir)
+        strokes = s
+        bg = meta.background ?? Self.paper
+        viewport = meta.viewport
+        started = meta.startedAt
+        pageError = nil
+      } catch {
+        // Keep the typed page; surface the ink load failure instead of silently drawing blank.
+        pageError = "Could not load ink for \(target): \(error.localizedDescription)"
+        Self.log.error(
+          "load ink failed day=\(target, privacy: .public) err=\(error.localizedDescription, privacy: .public)"
+        )
+      }
     }
     c.storage.journalDir = dir
-    c.storage.enterJournal(title: page.title.isEmpty ? "Journal \(target)" : page.title)
     c.startSession(
       id: "journal-\(target)", strokes: strokes, background: bg, viewport: viewport,
       startedAt: started)
+    // Seed incremental-save state from the day folder *after* the document is replaced.
+    c.storage.enterJournal(
+      title: page.title.isEmpty ? "Journal \(target)" : page.title, dir: dir)
     knownInk = Set(strokes.map(\.id))
     refreshAnchors()
+    ensureCanvasOnScreen()
     sendState()
+    Self.log.info(
+      "loaded day=\(target, privacy: .public) strokes=\(strokes.count) entries=\(self.page.entries.count)"
+    )
   }
 
   // MARK: Day boundaries
@@ -240,9 +285,15 @@ final class JournalController: ObservableObject {
     let ids = coordinator.store.strokes.filter { $0.tool == .pen || $0.tool == .highlighter }.map(
       \.id)
     guard Set(ids) != knownInk else { return }
+    let added = ids.filter { !knownInk.contains($0) }
     knownInk = Set(ids)
     page.trackInk(present: ids, at: Date())
     savePage()
+    if !added.isEmpty {
+      Self.log.info(
+        "ink accepted day=\(self.day, privacy: .public) new=\(added.count) total=\(ids.count) rendered=\(self.coordinator.workspace.canvasOnScreen)"
+      )
+    }
   }
 
   func addEntry(_ text: String, kind: JournalEntry.Kind) {

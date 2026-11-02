@@ -65,13 +65,15 @@ public struct JournalIndex: Sendable {
 }
 
 extension JournalStore {
-  /// The day has saved ink.
+  /// The day has saved ink (full `strokes.json` and/or append-only `strokes.log`).
   public func hasInk(_ day: String) -> Bool {
     let d = dayDir(day)
     return FileManager.default.fileExists(atPath: d.appendingPathComponent("strokes.json").path)
       || FileManager.default.fileExists(atPath: d.appendingPathComponent("strokes.log").path)
   }
 }
+
+// hasContent (page and/or ink) lives on JournalStore in Journal.swift and drives days().
 
 /// A small picture of some strokes, for journal entries (handwriting previews).
 public enum InkThumbnail {

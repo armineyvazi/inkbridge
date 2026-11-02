@@ -127,6 +127,29 @@ final class JournalTests: XCTestCase {
     )
   }
 
+  /// Append-only days (strokes.log, empty strokes.json) must still appear in History.
+  func testDaysIncludesLogOnlyInk() throws {
+    let store = JournalStore(root: tmp)
+    let day = "2026-11-03"
+    let dir = store.dayDir(day)
+    try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+    let style = StrokeStyle(color: .black, width: 3, pressureSensitive: false)
+    let stroke = Stroke(
+      id: "s-log-1", tool: .pen, style: style, points: [InkPoint(x: 1, y: 2, p: 1, t: 0)])
+    let meta = SessionMetadata(
+      id: "journal-\(day)", title: "Journal \(day)", startedAt: Date(), savedAt: Date(),
+      deviceName: nil, displayName: nil,
+      mapper: CoordinateMapper(
+        canvas: CGSize(width: 100, height: 100), surface: CGSize(width: 100, height: 100)),
+      strokeCount: 1)
+    try SessionArchive.appendStrokes([stroke], metadata: meta, to: dir)
+    try Data("[]".utf8).write(to: dir.appendingPathComponent("strokes.json"))
+    XCTAssertTrue(store.hasContent(day))
+    XCTAssertEqual(store.days(), [day])
+    let loaded = try SessionArchive.load(from: dir).1
+    XCTAssertEqual(loaded.map(\.id), ["s-log-1"], "load must replay strokes.log onto empty json")
+  }
+
   /// Workspace preservation: the open document, including undo history, comes back exactly.
   func testSnapshotRestoresTheWorkspaceExactly() {
     let store = StrokeStore()

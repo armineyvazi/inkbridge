@@ -78,7 +78,7 @@ class DashboardActivity : InkActivity() {
             if (open) {
                 val (weekday, date) = app.inkbridge.android.features.canvas.JournalSheet.formatDay(j!!.day)
                 Ink.setValue(journalDay, "$weekday, $date" + if (j.today) " · Today" else "")
-                Ink.setValue(journalWhere, if (j.hidden) "Put away on your Mac (still saving)" else "Open on your Mac")
+                Ink.setValue(journalWhere, "Open on your Mac")
             }
         }
         observe(combine(manager.paired, manager.client.state) { p, s -> p to s }) { (p, s) ->

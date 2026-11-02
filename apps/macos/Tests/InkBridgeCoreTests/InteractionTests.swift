@@ -33,6 +33,22 @@ final class WorkspaceTests: XCTestCase {
     XCTAssertFalse(putAwayInk.canvasOnScreen)
   }
 
+  /// Regression: opening the journal while "Hide ink" is on must still treat the
+  /// canvas as needing to be forced on (UI layer clears inkVisible). Document the
+  /// workspace rule so a future change cannot silently drop tablet ink.
+  func testJournalWithInkHiddenIsNotOnScreenUntilForced() {
+    let ws = Workspace.resolve(
+      background: .studio, pointer: .pointer, engineering: false,
+      journalActive: true, journalHidden: false, inkVisible: false)
+    XCTAssertEqual(ws.surface, .journal)
+    XCTAssertFalse(ws.canvasOnScreen, "UI must force overlayVisible before drawing journal ink")
+    let visible = Workspace.resolve(
+      background: .studio, pointer: .pointer, engineering: false,
+      journalActive: true, journalHidden: false, inkVisible: true)
+    XCTAssertTrue(visible.canvasOnScreen)
+    XCTAssertTrue(visible.escapeLeavesJournal)
+  }
+
   func testOverlayAllowsBackgroundFlip() {
     let ws = Workspace.resolve(
       background: .studio, pointer: .pointer, engineering: false, journalActive: false)

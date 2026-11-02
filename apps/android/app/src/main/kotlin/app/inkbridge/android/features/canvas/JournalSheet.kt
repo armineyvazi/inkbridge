@@ -78,22 +78,15 @@ class JournalSheet(
             return
         }
         header(state)
-        if (state.hidden) {
-            addView(Ink.text(ctx, "Put away on your Mac. What you write here is still saved.", Ink.CAPTION).apply {
-                background = Ink.box(ctx, Ink.PAPER, Ink.INK, radius = 8)
-                setPadding(Ink.dp(ctx, 12), Ink.dp(ctx, 8), Ink.dp(ctx, 12), Ink.dp(ctx, 8))
-            }, lp(Ink.S))
-        }
         composer()
         entries(state.entries)
-        addView(Ink.row(ctx).apply {
-            addView(Ink.button(ctx, if (state.hidden) "Show on Mac" else "Hide on Mac", Ink.ButtonStyle.SECONDARY) {
-                request(if (state.hidden) "show" else "hide", null)
-            }, LayoutParams(0, LayoutParams.WRAP_CONTENT, 1f))
-            addView(View(ctx), LayoutParams(Ink.dp(ctx, Ink.S), 1))
-            addView(Ink.button(ctx, "Done — back to work", Ink.ButtonStyle.PRIMARY) { request("close", null) },
-                LayoutParams(0, LayoutParams.WRAP_CONTENT, 1.4f))
-        }, lp(Ink.M))
+        // Hide/Done both leave the journal on the Mac and restore the previous workspace.
+        // A former "put away" mode kept routing ink into the day while the Mac canvas was
+        // ordered out — writing looked broken. One clear exit path avoids that.
+        addView(
+            Ink.button(ctx, "Done — back to work", Ink.ButtonStyle.PRIMARY) { request("close", null) },
+            lp(Ink.M),
+        )
     }
 
     /** ‹  SUNDAY · TODAY / 1 November 2026  ›   ×  */

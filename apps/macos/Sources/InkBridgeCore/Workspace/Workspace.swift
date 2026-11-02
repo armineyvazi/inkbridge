@@ -97,8 +97,12 @@ public struct Workspace: Equatable, Sendable {
     return true
   }
 
-  /// Esc while the journal is open puts it away; otherwise it returns to Desktop Overlay.
-  public var escapeHidesJournal: Bool { surface == .journal && !journalHidden }
+  /// Esc while the journal is open leaves it (restores the previous workspace);
+  /// otherwise Esc returns to Desktop Overlay.
+  public var escapeLeavesJournal: Bool { surface == .journal && !journalHidden }
+
+  /// - Important: Prefer `escapeLeavesJournal`. Kept as a synonym for older call sites.
+  public var escapeHidesJournal: Bool { escapeLeavesJournal }
 
   /// Whether the opaque studio look (not click-through overlay chrome) is in effect.
   public var usesStudioChrome: Bool {

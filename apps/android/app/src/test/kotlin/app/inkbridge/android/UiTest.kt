@@ -320,7 +320,7 @@ class UiTest {
     }
 
     @Test
-    fun journalSheetShowsPutAwayStateAndKeepsATypedNoteAcrossUpdates() {
+    fun journalSheetKeepsTypedNoteAcrossUpdatesAndDoneLeaves() {
         val a = Robolectric.buildActivity(CanvasActivity::class.java).setup().get()
         val asked = mutableListOf<String>()
         val sheet = JournalSheet(a, { action, _ -> asked += action; true }, {})
@@ -331,13 +331,12 @@ class UiTest {
         // New handwriting on the page: the Mac sends an update while the note is being typed.
         sheet.render(open.copy(entries = listOf(JournalItem("j1", "ink", "", false, 1_793_500_000_000)), revision = 2), connected = true)
         assertEquals("half a thought", sheet.findViews<EditText>().single().text.toString(), "a typed note survives updates")
-        assertTrue(sheet.texts().contains("Hide on Mac"))
-        sheet.render(open.copy(hidden = true, revision = 3), connected = true)
-        assertTrue(sheet.texts().any { it.startsWith("Put away on your Mac") }, sheet.texts().toString())
-        var button: View = sheet.findViews<TextView>().single { it.text == "Show on Mac" }
+        assertTrue(sheet.texts().contains("Done — back to work"))
+        assertTrue(sheet.texts().none { it.contains("Hide on Mac") || it.startsWith("Put away") })
+        var button: View = sheet.findViews<TextView>().single { it.text == "Done — back to work" }
         while (!button.hasOnClickListeners()) button = button.parent as View
         button.performClick()
-        assertEquals(listOf("show"), asked)
+        assertEquals(listOf("close"), asked)
     }
 
     @Test
