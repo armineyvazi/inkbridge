@@ -1,0 +1,15 @@
+flowchart TB
+  subgraph Local["Local trust boundary"]
+    Doc[Source + Ink + Semantic]
+    CB[Context Builder]
+    Panel[AI Panels]
+    KC[Keychain / Keystore]
+    CLI[Claude / Cursor subprocess]
+  end
+  subgraph Cloud["External"]
+    OR[OpenRouter / upstream models]
+  end
+  Doc --> CB --> Panel
+  Panel -->|explicit consent| OR
+  KC -.->|Bearer at request time| OR
+  Panel --> CLI

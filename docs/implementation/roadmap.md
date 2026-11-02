@@ -113,3 +113,20 @@ adb reverse, p50 5 ms). Note Air 3 itself is still untested.
    `NativeUsbTransport` on both sides. This removes the developer-mode requirement,
    the biggest blocker for real users.
 4. ~~TLS + QR pairing for Wi-Fi~~ done in v0.3.
+
+## AI-native Knowledge & Provider Hub (proposed)
+
+Design docs only as of 2026-11-03 — see [`docs/architecture/ai/`](../architecture/ai/README.md)
+and ADRs 011–013. **No Hub/OCR/agent code in the product yet.**
+
+| Phase | Focus | Status |
+|-------|--------|--------|
+| 0 | Architecture docs, ADRs, diagrams | ✅ docs |
+| 1 | PDF/page Source foundation + region mapping | ⬜ |
+| 2 | OCR/HTR + annotation associations | ⬜ |
+| 3 | AI Context Builder | ⬜ |
+| 4 | Provider Hub + OpenRouter + Keychain/Keystore + AI panels | ⬜ |
+| 5 | Knowledge Library (Save Answer) | ⬜ |
+| 6 | Claude Code CLI adapter | ⬜ |
+| 7 | Cursor CLI/SDK adapter | ⬜ |
+| 8 | Advanced workflows + eval sets | ⬜ |

@@ -1,0 +1,16 @@
+sequenceDiagram
+  participant U as User
+  participant P as AI Panel
+  participant CB as Context Builder
+  participant M as Integration Manager
+  participant A as Adapter
+  U->>P: Ask + select provider/model
+  P->>CB: Build package
+  P->>U: Context preview / consent
+  U->>P: Confirm send
+  P->>M: startStreaming
+  M->>A: request
+  A-->>P: token deltas
+  U->>P: Stop optional
+  P->>U: Final answer + usage
+  U->>P: Save Answer optional

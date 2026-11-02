@@ -1,0 +1,9 @@
+sequenceDiagram
+  participant UI as Provider Hub
+  participant KC as Keychain
+  participant OR as openrouter.ai
+  UI->>KC: load API key for connectionId
+  UI->>OR: GET /api/v1/models
+  OR-->>UI: model metadata
+  UI->>OR: POST /api/v1/chat/completions stream
+  OR-->>UI: SSE deltas + usage

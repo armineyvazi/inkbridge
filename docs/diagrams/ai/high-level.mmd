@@ -1,0 +1,29 @@
+flowchart TB
+  subgraph Doc["Document intelligence"]
+    S[Source Layer]
+    I[Ink Layer]
+    M[Semantic Layer]
+  end
+  CB[AI Context Builder]
+  Hub[AI Integration Manager]
+  Reg[Provider Registry]
+  Cred[Secure Credential Store]
+  Cap[Model Capability Registry]
+  Conv[Conversation Manager]
+  Persist[Response Persistence]
+  Lib[Knowledge Library]
+
+  S --> CB
+  I --> CB
+  M --> CB
+  CB --> Conv
+  Hub --> Reg
+  Hub --> Cred
+  Hub --> Cap
+  Conv --> Hub
+  Hub --> OR[OpenRouter Adapter]
+  Hub --> CC[Claude Code Adapter]
+  Hub --> CU[Cursor Adapter]
+  Conv --> UI[macOS + Android AI Panels]
+  UI --> Persist
+  Persist --> Lib

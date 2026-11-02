@@ -1,0 +1,7 @@
+flowchart LR
+  Src[Source: PDF / pages / text] --> Sem[Semantic: OCR HTR relations AI]
+  Ink[Ink: strokes diagrams] --> Sem
+  Sem --> CB[Context Builder]
+  Src --> CB
+  Ink --> CB
+  CB --> Prov[Cloud / local adapters]
