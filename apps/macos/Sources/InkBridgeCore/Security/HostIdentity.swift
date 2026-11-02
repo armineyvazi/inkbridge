@@ -2,6 +2,15 @@ import CryptoKit
 import Foundation
 import Security
 
+// SecIdentityCreate is not always in the public SDK headers (older Xcode on
+// GitHub Actions). The symbol exists in Security.framework on macOS 13+.
+@_silgen_name("SecIdentityCreate")
+private func inkSecIdentityCreate(
+  _ allocator: CFAllocator?,
+  _ certificate: SecCertificate,
+  _ privateKey: SecKey
+) -> SecIdentity?
+
 /// The Mac's long-lived TLS identity: a P-256 key and a self-signed
 /// certificate, plus a random host ID.
 ///
@@ -79,7 +88,7 @@ public final class HostIdentity: @unchecked Sendable {
       throw IdentityError.key(error.map { "\($0.takeRetainedValue())" } ?? "unknown")
     }
     // Returns nil when the key does not match the certificate (e.g. a stale cert file).
-    guard let identity = SecIdentityCreate(nil, cert, secKey) else { throw IdentityError.identity }
+    guard let identity = inkSecIdentityCreate(nil, cert, secKey) else { throw IdentityError.identity }
     self.hostID = hostID
     self.certificateDER = certificateDER
     self.fingerprint = Data(SHA256.hash(data: certificateDER))

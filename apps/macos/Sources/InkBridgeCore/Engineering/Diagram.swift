@@ -328,12 +328,14 @@ public enum ConnectorRouter {
         horizontal
         ? CGPoint(x: p2.x - (dx >= 0 ? k : -k), y: p2.y)
         : CGPoint(x: p2.x, y: p2.y - (dy >= 0 ? k : -k))
-      return (0...16).map { i in
+      return (0...16).map { i -> CGPoint in
         let t = CGFloat(i) / 16
         let u = 1 - t
-        return CGPoint(
-          x: u * u * u * p1.x + 3 * u * u * t * c1.x + 3 * u * t * t * c2.x + t * t * t * p2.x,
-          y: u * u * u * p1.y + 3 * u * u * t * c1.y + 3 * u * t * t * c2.y + t * t * t * p2.y)
+        let uu = u * u
+        let tt = t * t
+        let x = uu * u * p1.x + 3 * uu * t * c1.x + 3 * u * tt * c2.x + tt * t * p2.x
+        let y = uu * u * p1.y + 3 * uu * t * c1.y + 3 * u * tt * c2.y + tt * t * p2.y
+        return CGPoint(x: x, y: y)
       }
     }
   }

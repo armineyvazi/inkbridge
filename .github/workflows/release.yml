@@ -9,9 +9,38 @@ permissions:
   contents: write
 
 jobs:
-  release:
-    name: Publish GitHub Release
+  macos:
+    name: macOS artifacts
     runs-on: macos-14
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Verify tests
+        run: make test-macos
+
+      - name: macOS release binary
+        run: make -C apps/macos release
+
+      - name: Stage macOS artifact
+        run: |
+          mkdir -p dist
+          VERSION="${GITHUB_REF_NAME}"
+          BIN="$HOME/Library/Caches/InkBridge/macos-build/release/InkBridge"
+          test -f "$BIN"
+          cp "$BIN" "dist/InkBridge-${VERSION}-macos-bin"
+          (cd dist && shasum -a 256 * > SHA256SUMS-macos.txt)
+
+      - name: Upload macOS artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: macos-dist
+          path: dist/
+          if-no-files-found: error
+
+  android:
+    name: Android artifacts
+    runs-on: ubuntu-latest
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -25,9 +54,8 @@ jobs:
 
       - name: Set up Android SDK
         uses: android-actions/setup-android@v3
-
-      - name: Verify tests
-        run: make test-macos
+        with:
+          packages: platform-tools platforms;android-34 build-tools;34.0.0
 
       - name: Android tests and APK
         working-directory: apps/android
@@ -35,23 +63,42 @@ jobs:
           echo "sdk.dir=$ANDROID_HOME" > local.properties
           ./gradlew --no-daemon :core:test :app:testDebugUnitTest :app:assembleDebug
 
-      - name: macOS release binary
-        run: make -C apps/macos release
-
-      - name: Stage artifacts
+      - name: Stage Android artifact
         run: |
           mkdir -p dist
           VERSION="${GITHUB_REF_NAME}"
           APK="$HOME/Library/Caches/InkBridge/android-build/app/outputs/apk/debug/app-debug.apk"
-          if [ -f "$APK" ]; then
-            cp "$APK" "dist/InkBridge-${VERSION}-android-debug.apk"
-          fi
-          BIN="$HOME/Library/Caches/InkBridge/macos-build/release/InkBridge"
-          if [ -f "$BIN" ]; then
-            cp "$BIN" "dist/InkBridge-${VERSION}-macos-bin"
-          fi
-          (cd dist && shasum -a 256 * > SHA256SUMS.txt)
-          ls -la dist
+          test -f "$APK"
+          cp "$APK" "dist/InkBridge-${VERSION}-android-debug.apk"
+          (cd dist && sha256sum * > SHA256SUMS-android.txt)
+
+      - name: Upload Android artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: android-dist
+          path: dist/
+          if-no-files-found: error
+
+  publish:
+    name: Publish GitHub Release
+    needs: [macos, android]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Download artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+
+      - name: Combine checksums
+        run: |
+          cd dist
+          cat SHA256SUMS-*.txt > SHA256SUMS.txt
+          rm -f SHA256SUMS-*.txt
+          ls -la
 
       - name: Resolve release notes file
         id: notes
