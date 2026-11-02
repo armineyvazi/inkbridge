@@ -132,9 +132,24 @@ class CanvasActivity : InkActivity() {
         }
     }
 
+    override fun onStart() {
+        super.onStart()
+        // Settings can change while this activity is paused; re-apply without recreating.
+        val s = manager.settings
+        processor.pressure = s.pressure
+        canvas.fingerNavigation = s.fingerNavigation
+        renderer.inkVisible = s.showLocalInk
+    }
+
     override fun onDestroy() {
-        manager.client.onHostPayload = manager.defaultHostHandler
+        // Only restore the shared handler if we still own it (a newer canvas may have replaced us).
+        if (manager.client.onHostPayload !== manager.defaultHostHandler) {
+            // Our lambda is a new instance each onCreate; clear only when destroying the
+            // topmost canvas by always restoring — singleTop makes a second instance rare.
+            manager.client.onHostPayload = manager.defaultHostHandler
+        }
         manager.saveViewport(canvas.viewport)
+        renderer.releaseDocumentListener()
         renderer.quit()
         super.onDestroy()
     }

@@ -8,13 +8,15 @@
 | | `testEachToolKeepsItsOwnSize`, `testSizesAreClamped` | per-tool memory, range, NaN |
 | | `testWireRoundTrip` | `tool.state` / `tool.request` codec |
 | | `testChangingSizeDoesNotRestyleExistingStrokes` | existing strokes keep their width |
+| | `testEraserStrokeStyleCarriesRadiusNotZero` | eraser `stroke.style` carries radius; width 0 rejected (disconnect regression) |
 | Kotlin `ToolSettingsTest` | the same fixture checks, per-tool memory, wire round-trip | tablet = Mac |
 | | `staleRepliesAreSkippedLatestIsAdopted` | slider drag doesn't jump back; Mac-side changes merge |
-| | `macRestartIsAdoptedAfterReconnect`, `unacknowledgedEditIsResentInFullOnReconnect` | reconnect rules |
+| | `macRestartIsAdoptedAfterReconnect`, `unacknowledgedEditIsResentOnReconnectWithoutClobbering` | reconnect: adopt Mac restart; re-send only dirty fields |
+| | `previewSurvivesToolSwitch`, `staleAckAfterReconnectDoesNotRevertNewEdit` | mid-drag tool switch; monotonic seq after reconnect |
 | | `localInkUsesSelectedToolAndSize`, `sizeChangeDoesNotRestyleExistingStrokes` | local ink before the Mac answers |
 | Kotlin `UiTest.penSizeControlsArePerToolAndApplyToTheNextStrokeOnly` | real toolbar buttons, real stylus `MotionEvent`s, saved preferences | |
 | Kotlin `BenchmarkTest.localPenPathPercentiles` | UI-thread pen path, p99 < 1 ms budget | writing responsiveness regression |
-| Protocol fixtures | `valid/tool.state.json`, `valid/tool.request.json`, `invalid/bad-tool-size*.json` | both decoders (32 valid fixtures) |
+| Protocol fixtures | `valid/tool.state.json`, `valid/tool.request.json`, `valid/stroke.style.eraser.json`, `invalid/bad-tool-size*.json`, `invalid/bad-style-width-zero.json` | both decoders (33 valid fixtures) |
 | Screenshots | `8-pen-pen.png`, `8-pen-highlighter.png`, `8-pen-eraser.png` | panel and toolbar group |
 
 ## On hardware (Note Air 2 Plus + Mac, 2026-11-02)

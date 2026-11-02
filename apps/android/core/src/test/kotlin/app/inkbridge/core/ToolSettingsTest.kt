@@ -128,24 +128,49 @@ class ToolSettingsTest {
         assertNull(sync.connected(), "everything was acknowledged: nothing to re-send")
         assertTrue(sync.adoptLatest())
         assertEquals(7.0, sync.settings.pen)
-        // And later Mac states are adopted normally.
+        // And later Mac states are adopted normally (acks stay at 0 after a restart).
         assertTrue(sync.receive(Payload.ToolState(ToolSettings().withSize(Tool.PEN, 8.0), 2, ack = 0)))
     }
 
-    /** An edit the Mac never acknowledged (made offline) is re-sent in full on reconnect and wins. */
+    /** An offline size edit is re-sent with only that field, so it cannot clobber the Mac's other sizes. */
     @Test
-    fun unacknowledgedEditIsResentInFullOnReconnect() {
+    fun unacknowledgedEditIsResentOnReconnectWithoutClobbering() {
         val sync = ToolSync(ToolSettings())
         sync.edit(ToolSettings().withSize(Tool.PEN, 9.0), false, Tool.PEN)  // offline
         val req = sync.connected()!!
-        assertEquals(ToolSettings().withSize(Tool.PEN, 9.0).sizes, req.sizes)
-        assertEquals(Tool.PEN, req.tool)
+        assertEquals(mapOf(Tool.PEN to 9.0), req.sizes)
+        assertNull(req.tool, "only the pen size changed")
         // The Mac's connect-time state (its own older value) is not adopted…
         assertFalse(sync.receive(Payload.ToolState(ToolSettings().withSize(Tool.PEN, 7.0), 1, ack = 0)))
         assertEquals(9.0, sync.settings.pen)
-        // …the reply to the full request is.
+        // …the reply to the request is.
         sync.receive(Payload.ToolState(ToolSettings().withSize(Tool.PEN, 9.0), 2, ack = req.seq))
         assertEquals(9.0, sync.settings.pen)
         assertNull(sync.connected())
+    }
+
+    /** A slider preview must survive a tool switch: the size is committed with the new tool. */
+    @Test
+    fun previewSurvivesToolSwitch() {
+        val sync = ToolSync(ToolSettings())
+        sync.preview(ToolSettings().withSize(Tool.PEN, 10.0), Tool.PEN)
+        assertEquals(10.0, sync.settings.pen)
+        val req = sync.edit(sync.settings.copy(tool = Tool.HIGHLIGHTER), toolChanged = true, sizeOf = sync.pendingSize())
+        assertEquals(Tool.HIGHLIGHTER, req.tool)
+        assertEquals(mapOf(Tool.PEN to 10.0), req.sizes)
+        assertEquals(10.0, sync.settings.pen)
+    }
+
+    /** After reconnect, a late Mac state with an old ack must not overwrite a new local edit. */
+    @Test
+    fun staleAckAfterReconnectDoesNotRevertNewEdit() {
+        val sync = ToolSync(ToolSettings())
+        sync.edit(ToolSettings().withSize(Tool.PEN, 7.0), false, Tool.PEN)
+        sync.receive(Payload.ToolState(ToolSettings().withSize(Tool.PEN, 7.0), 1, ack = 1))
+        assertNull(sync.connected())
+        sync.adoptLatest() // no-op without a newer state; re-baselines to ack 1
+        sync.edit(ToolSettings().withSize(Tool.PEN, 9.0), false, Tool.PEN)
+        assertFalse(sync.receive(Payload.ToolState(ToolSettings().withSize(Tool.PEN, 7.0), 1, ack = 1)))
+        assertEquals(9.0, sync.settings.pen)
     }
 }

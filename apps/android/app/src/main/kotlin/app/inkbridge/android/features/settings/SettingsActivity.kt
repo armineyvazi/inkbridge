@@ -26,7 +26,7 @@ import app.inkbridge.core.protocol.PROTOCOL_VERSION
 class SettingsActivity : InkActivity() {
     private var s: AppSettings
         get() = manager.settings
-        set(v) = manager.update(v)
+        set(v) { manager.update(v) }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -60,8 +60,10 @@ class SettingsActivity : InkActivity() {
         c.add(Ink.section(this, "Connection"), 0)
         c.add(Ink.setting(this, "Connect with", "Wi-Fi needs no cable. USB needs USB debugging and adb on the Mac.",
             Ink.segmented(this, listOf("Wi-Fi", "USB cable"), if (s.mode == ConnectionMode.WIFI) 0 else 1) {
+                // update() (via the settings setter) already restarts on mode change;
+                // calling resume() as well used to leave two connection loops running.
                 s = s.copy(mode = if (it == 0) ConnectionMode.WIFI else ConnectionMode.USB)
-                manager.resume()
+                if (manager.paused.value) manager.resume()
             }, below = true), 0)
         val paired = manager.paired.value
         if (paired != null) {

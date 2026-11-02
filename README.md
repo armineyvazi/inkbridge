@@ -1,97 +1,134 @@
 # InkBridge
 
-Use a **BOOX** e-ink tablet (target: Note Air 3; tested on a Note Air 2 Plus) as a pen tablet for macOS. Write on the tablet, and your
-strokes stay on the tablet **and** appear as native vector ink **over whatever is on the Mac's screen**: videos,
-PDFs, browsers, Figma, slides. The overlay is click-through, so the app underneath
-keeps working.
+[![CI](https://github.com/armineyvazi/inkbridge/actions/workflows/ci.yml/badge.svg)](https://github.com/armineyvazi/inkbridge/actions/workflows/ci.yml)
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
+[![Release](https://img.shields.io/github/v/release/armineyvazi/inkbridge?include_prereleases)](https://github.com/armineyvazi/inkbridge/releases)
 
-InkBridge does not mirror the screen. The tablet sends pen samples (normalized
-position, pressure, time). The Mac renders them in a transparent overlay. It uses
-about 30 KB/s while drawing, keeps ink editable, and runs entirely on your local
-network or USB cable.
+**v0.1.0** — developer preview.
 
-> **Status: Phase 0/1 (developer preview).** Protocol, Mac host, overlay, tools,
-> sessions, shared infinite canvas and Android client are implemented. **Verified on a real BOOX Note Air 2 Plus
-> over USB:** 360 Hz pen input with full pressure, tilt and hover; pen-to-Mac latency
-> p50 5 ms / p95 16 ms. See the [feasibility report](docs/research/hardware-feasibility.md). USB currently needs
-> USB debugging (`adb reverse`). A no-developer-mode USB transport (Android Open
-> Accessory) is the next milestone; the device's support for it is confirmed.
+Use a **BOOX** e-ink tablet (target: Note Air 3; verified on Note Air 2 Plus) as a pen
+tablet for macOS. Write on the tablet; strokes stay on the tablet **and** appear as
+native vector ink **over whatever is on the Mac’s screen** (videos, PDFs, browsers,
+Figma, slides). The overlay is click-through, so the app underneath keeps working.
+
+InkBridge does **not** mirror the screen. The tablet sends pen samples (normalized
+position, pressure, time). The Mac renders them in a transparent overlay. Traffic is
+about 30 KB/s while drawing. Everything stays on your local network or USB cable.
 
 ```mermaid
 flowchart LR
-  Pen[BOOX stylus] --> A["Android app<br/>MotionEvent → normalized strokes"]
-  A -- "USB (adb reverse) / Wi-Fi (paired)" --> M["Mac host<br/>validate → arbitrate → StrokeStore"]
-  M --> O["Transparent click-through overlay<br/>on the selected display"]
+  Pen[BOOX stylus] --> A["Android app<br/>MotionEvent → strokes"]
+  A -- "USB / Wi-Fi TLS" --> M["Mac host<br/>validate → StrokeStore"]
+  M --> O["Transparent click-through overlay"]
 ```
+
+## Status
+
+| | |
+|---|---|
+| Phase | Developer preview (`v0.1.0`) |
+| Verified hardware | BOOX Note Air 2 Plus over USB and Wi-Fi |
+| Pending hardware | Note Air 3; AOA USB without developer mode |
+| License | [MIT](LICENSE) |
+
+Claims in this README match what is **built and tested**. Hardware claims are labelled
+in `docs/` as Verified (hardware), Verified (sourced), or Pending.
+
+## Features
+
+| Area | Capability |
+|------|------------|
+| Canvas | Shared infinite canvas; zoom/pan on tablet; Fit / Home; ink persists on tablet |
+| Tools | Pen (pressure), highlighter, eraser, laser; **tablet pen-size** controls; sizes in canvas px shared with Mac |
+| Editing | Undo/redo of strokes; clear is undoable |
+| Overlay | Transparent, click-through, any display, above full-screen apps |
+| Daily Journal | ⌃⌥N — per-day pages, hide without leaving, history |
+| Studio & Engineering | Backgrounds; Engineering (⌃⌥G): components, connectors, templates |
+| Storage | Projects, incremental autosave, layered Save… (PNG/JPEG/SVG/PDF) |
+| Connection | Wi-Fi first (Bonjour, TLS pin, one-time code); optional USB via `adb reverse` |
 
 ## Quick start
 
 ```bash
-# Mac host
-make -C apps/macos run
+git clone https://github.com/armineyvazi/inkbridge.git
+cd inkbridge
 
-# Tablet: enable USB debugging (Settings → About → tap Build number 7×), then
-make -C apps/android install
-scripts/adb-usb.sh --watch      # keeps the USB tunnel up across replugs
+# Mac host
+make install-macos
+
+# Tablet (USB debugging on; see docs/implementation/setup.md)
+make install-android
+scripts/adb-usb.sh --watch
 ```
 
-**Wi-Fi (default, no cable):** on the Mac choose menu-bar pen → Connect Device… (⌃⌥K).
-On the tablet tap Connect to Mac, pick the Mac and type the one-time code. After that
-it reconnects by itself. USB is optional. Details:
-[setup](docs/implementation/setup.md).
+**Wi-Fi (no cable):** Mac menu-bar pen → Connect Device… (⌃⌥K). On the tablet: Connect
+to Mac → pick the Mac → enter the code. Details: [setup](docs/implementation/setup.md).
 
-No tablet yet? `scripts/e2e.sh` runs the Kotlin client against the Swift host with a
+No tablet? `scripts/e2e.sh` runs the Kotlin client against the Swift host with a
 simulated pen.
 
-## Features
+## Repository layout
 
-| | |
+```text
+apps/android/     Kotlin: :core (pure JVM), :app, :simulator
+apps/macos/       Swift: InkBridgeCore, InkBridge.app, inkbridge-probe
+protocol/         Shared fixtures for both test suites
+scripts/          e2e.sh, adb-usb.sh, latency-run.sh
+docs/             Architecture, protocol, ADRs, testing, release notes
+tools/aoa-probe   USB AOA capability probe (C, libusb)
+```
+
+The layout follows platform boundaries already used in development. Do not invent
+extra `domain/` / `infrastructure/` layers unless a concrete need appears.
+
+## Development
+
+```bash
+make help
+make test          # macOS + Android tests
+make lint          # swift-format lint + Android lintDebug
+make check         # lint + test (CI entry point)
+make format        # apply Swift formatting
+```
+
+Prerequisites and permissions: [docs/implementation/setup.md](docs/implementation/setup.md).  
+Contributing: [CONTRIBUTING.md](CONTRIBUTING.md).
+
+## Documentation
+
+| Start here | |
 |---|---|
-| Canvas | infinite and shared: zoom (pinch, ±) and pan (finger) on the tablet, Fit all / Home on both; ink persists on the tablet |
-| Tools | pen (pressure), highlighter, stroke eraser, laser pointer, colors. **Pen size on the tablet:** tool buttons, − / + and a size panel (live preview, slider, XS–XL presets); each tool keeps its own size; sizes are page units (same thickness at any zoom) and shared with the Mac toolbar |
-| Editing | undo/redo of whole strokes; clear is undoable |
-| Overlay | transparent, click-through, above full-screen apps, any display |
-| Toolbar | expanded / compact / minimal; bottom, top, left, right or anywhere; hide, then reopen from the menu-bar icon |
-| Shortcuts | ⌃⌥ P/H/E/L tools · Z undo · ⇧Z redo · C clear · F fit · 0 home · O hide · S save · T toolbar |
-| Daily Journal | ⌃⌥N or 📖: today's page in one action, timestamped handwriting/notes/tasks, History with calendar and search, **hide without leaving** (📖 again brings it back as it was), Done returns to your work exactly (undo history included). Own folder, local-midnight day changes |
-| Studio & Engineering | backgrounds (overlay or studio colour, grid/dots/graph/engineering paper); Engineering workspace (⌃⌥G): components, smart connectors, templates |
-| Sessions | projects & storage window (⌃⌥J); incremental autosave (appends new strokes, compacts later), crash recovery; **Save…** to any folder: full page (PNG/JPEG), transparent ink layer (PNG + SVG), editable strokes, background, mapping metadata |
-| Connection | Wi-Fi first: Bonjour discovery, TLS with a pinned certificate, one-time pairing code (or QR link), device tokens; reconnect 163 ms after Wi-Fi returns; strokes lost on a dead link are re-sent. Optional USB (adb reverse) |
-| Tablet app | E-ink-first UI: dashboard, Connect to Mac, full-screen canvas with a slim floating bar, Settings, Diagnostics |
-| Diagnostics | live RTT and pen-to-Mac latency; exportable report; on-tablet stylus readout; per-stage writing latency (input, processing, handoff, draw, panel wait, post), CPU, heap and dropped samples (`scripts/latency-run.sh`) |
+| [docs/README.md](docs/README.md) | Doc index |
+| [Architecture overview](docs/architecture/system-overview.md) | System design |
+| [Protocol](docs/protocol/protocol-specification.md) | Wire format |
+| [ADRs](docs/decisions/) | Design decisions (001–010) |
+| [Release notes v0.1.0](docs/release-notes/v0.1.0.md) | This release |
+| [Security](SECURITY.md) · [security architecture](docs/architecture/security.md) | Threat model & reporting |
 
-## Repository
-
-```
-apps/android/     Kotlin: :core (protocol, input, transport, client; pure JVM), :app, :simulator
-apps/macos/       Swift: InkBridgeCore (library), InkBridge.app, inkbridge-probe
-protocol/fixtures shared test vectors, used by both test suites
-tools/aoa-probe   USB Android-Open-Accessory capability probe (C, libusb)
-scripts/          e2e.sh, adb-usb.sh
-docs/             research, architecture, protocol, ADRs, diagrams
-```
+Maintainer engineering notes may also live in a private Obsidian vault. **GitHub `docs/`
+is authoritative for contributors.** See [docs/README.md](docs/README.md#documentation-sources).
 
 ## Tests
 
 ```bash
-make -C apps/macos test     # 140 Swift tests (unit, socket and TLS integration, journal, performance)
-make -C apps/macos bench    # drawing and saving benchmarks (release), p50/p95
-make -C apps/android test   # 70 Kotlin core + 20 Robolectric UI tests
+make test-macos      # Swift unit + TLS integration
+make test-android    # Kotlin core + Robolectric UI
 scripts/e2e.sh && scripts/e2e.sh wifi
 ```
 
+BOOX panel latency and real stylus behaviour require hardware; CI covers logic and
+loopback transport, not photon-level e-ink timing.
+
 ## Known limitations
 
-- USB needs developer mode for now (AOA transport planned; see ADR-002).
-- Pairing uses a one-time code over TLS with a pinned certificate. There's no PAKE yet (see
-  [security](docs/architecture/security.md)).
-- There is no calibration wizard yet.
-- On the BOOX, ink latency is bound by the 40 Hz e-ink panel (sample → frame posted ≈ 30 ms p50).
-  BOOX's firmware raw-handwriting mode is not used yet ([writing latency](docs/performance/writing-latency.md)).
-- The tablet doesn't show the Mac's screen. That's by design.
-- Wi-Fi from the real tablet, eraser-end pens and the Note Air 3 itself are not yet tested.
-- The tablet shows ink in monochrome (e-ink); colours appear on the Mac.
+- USB needs developer mode for now (AOA planned; see ADR-002).
+- Pairing has no PAKE yet (see [security](docs/architecture/security.md)).
+- No calibration wizard yet.
+- On BOOX, local ink is bound by the ~40 Hz panel ([writing latency](docs/performance/writing-latency.md)).
+- The tablet does not show the Mac’s screen (by design).
+- Note Air 3 and eraser-end pens are not yet hardware-verified.
+- Tablet ink is monochrome; colours appear on the Mac.
 
-## Documentation
+## License
 
-Start at [docs/README.md](docs/README.md).
+[MIT](LICENSE) © 2026 Armin Eyvazi

@@ -227,7 +227,13 @@ class PenSheet(
     private val value: TextView = Ink.text(ctx, "", Ink.HEADING, bold = true).apply { gravity = Gravity.END }
     private val note = Ink.caption(ctx, "")
     private val preview = StrokePreview(ctx)
-    private val slider = SizeSlider(ctx) { v, final -> onSize(current, v, final) }
+    /** Tool captured at finger-down so a second finger switching tools mid-drag cannot retarget the size. */
+    private var sliding: Tool? = null
+    private val slider = SizeSlider(ctx) { v, final ->
+        if (sliding == null) sliding = current
+        onSize(sliding!!, v, final)
+        if (final) sliding = null
+    }
     private val tools = LinearLayout(ctx)
     private val presets = Ink.row(ctx)
     private var current: Tool = Tool.PEN

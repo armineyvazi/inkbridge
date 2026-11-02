@@ -20,6 +20,7 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.NonCancellable
+import kotlinx.coroutines.cancelAndJoin
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.channels.ReceiveChannel
 import kotlinx.coroutines.channels.produce
@@ -173,12 +174,15 @@ class InkBridgeClient(
         job = scope.launch { runLoop() }
     }
 
+    /**
+     * Stops the connection loop. Clears [job] *before* awaiting cancel so a concurrent
+     * [start] cannot attach a new loop that a second overlapping [stop] then nulls out
+     * (orphan loop that can never be stopped — Settings/Connect used to do stop+start twice).
+     */
     suspend fun stop() {
-        job?.let {
-            it.cancel()
-            it.join()
-        }
+        val j = job
         job = null
+        j?.cancelAndJoin()
         _state.value = ClientState.Idle
     }
 

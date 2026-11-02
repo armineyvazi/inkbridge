@@ -12,8 +12,8 @@ android {
         // BOOX Note Air 3 ships Android 12 (API 31); 26 keeps older BOOX models in reach.
         minSdk = 26
         targetSdk = 34
-        versionCode = 3
-        versionName = "0.3.0"
+        versionCode = 10
+        versionName = "0.1.0"
     }
 
     buildTypes {

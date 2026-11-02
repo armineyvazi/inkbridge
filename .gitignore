@@ -5,8 +5,22 @@ build/
 .kotlin/
 local.properties
 *.apk
+*.aab
 *.xcodeproj/xcuserdata/
 .swiftpm/
 .DS_Store
 .idea/
 *.iml
+*.xcuserstate
+DerivedData/
+.vscode/
+*.swp
+*~
+# Signing material and secrets — never commit
+*.p12
+*.mobileprovision
+*.jks
+*.keystore
+.env
+.env.*
+!.env.example

@@ -1,0 +1,76 @@
+name: Bug report
+description: Something does not work as documented
+title: "[bug] "
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for the report. Fill in as much as you can — hardware details matter for InkBridge.
+  - type: dropdown
+    id: component
+    attributes:
+      label: Component
+      options:
+        - macOS host
+        - Android / BOOX client
+        - Protocol / transport
+        - Documentation
+        - Build / CI
+        - Other
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: InkBridge version
+      description: Tag, commit, or `versionName` from the tablet Settings/About.
+      placeholder: "v0.1.0"
+    validations:
+      required: true
+  - type: input
+    id: macos
+    attributes:
+      label: macOS version
+      placeholder: "15.x"
+  - type: input
+    id: device
+    attributes:
+      label: Tablet model and Android version
+      placeholder: "BOOX Note Air 2 Plus, Android 11"
+  - type: dropdown
+    id: transport
+    attributes:
+      label: Connection
+      options:
+        - Wi-Fi (TLS)
+        - USB (adb reverse)
+        - Simulator / e2e only
+        - Not applicable
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      placeholder: |
+        1.
+        2.
+        3.
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behaviour
+    validations:
+      required: true
+  - type: textarea
+    id: actual
+    attributes:
+      label: Actual behaviour
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs / diagnostics
+      description: Mac console snippets, tablet Diagnostics export, or `adb logcat` lines. Redact tokens and pairing codes.

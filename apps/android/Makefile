@@ -1,12 +1,20 @@
-# Gradle and AGP 8.7 need JDK 17; don't depend on the shell's JAVA_HOME.
-JDK17 ?= $(shell /usr/libexec/java_home -v 17 2>/dev/null || echo /opt/homebrew/opt/openjdk@17/libexec/openjdk.jdk/Contents/Home)
+# AGP requires JDK 17+. Prefer a real JDK 17 over a stale JAVA_HOME (e.g. Homebrew openjdk@11).
+JDK17 := $(shell /usr/libexec/java_home -v 17 2>/dev/null)
+ifeq ($(JDK17),)
+JDK17 := /opt/homebrew/opt/openjdk@17/libexec/openjdk.jdk/Contents/Home
+endif
+ifneq ($(wildcard $(JDK17)/bin/java),)
 export JAVA_HOME := $(JDK17)
+endif
 GRADLE := ./gradlew
 
-.PHONY: test apk install simulate clean
+.PHONY: test apk install simulate clean lint
 
 test:
 	$(GRADLE) :core:test :app:testDebugUnitTest
+
+lint:
+	$(GRADLE) :app:lintDebug
 
 apk:
 	$(GRADLE) :app:assembleDebug

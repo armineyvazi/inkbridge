@@ -101,7 +101,8 @@ enum class ToolSize(val tool: Tool, val default: Double, val min: Double, val ma
  * back, so it is skipped: the reply to our latest edit carries the merged result.
  * The Mac keeps the ack per device stream, in memory. Every new connection re-baselines
  * through [connected], so a restarted Mac (acks back at 0) is adopted, and an edit it never
- * acknowledged is re-sent in full. Not thread-safe: use from one thread (the UI thread).
+ * acknowledged is re-sent with only its dirty fields (per-field last-writer-wins).
+ * Not thread-safe: use from one thread (the UI thread).
  */
 class ToolSync(initial: ToolSettings) {
     var settings: ToolSettings = initial
@@ -109,12 +110,30 @@ class ToolSync(initial: ToolSettings) {
     var revision: Long = -1
         private set
     private var lastSent = 0L
+    /** Fields changed since the Mac last acknowledged us (for a precise reconnect re-send). */
+    private var dirtyTool = false
+    private val dirtySizes = mutableSetOf<Tool>()
+
+    /**
+     * A local preview (slider drag): updates [settings] without a sequence number.
+     * The next [edit] / tool switch must include any dirty size so the Mac sees it.
+     */
+    fun preview(next: ToolSettings, sizeOf: Tool) {
+        settings = next
+        dirtySizes += sizeOf
+    }
+
+    /** A size still awaiting send or ack (for flushing on a mid-drag tool switch). */
+    fun pendingSize(): Tool? = dirtySizes.firstOrNull()
 
     /** A local change: returns the request to send. */
     fun edit(next: ToolSettings, toolChanged: Boolean, sizeOf: Tool?): app.inkbridge.core.protocol.Payload.ToolRequest {
         settings = next
         lastSent += 1
-        val sizes = if (sizeOf != null) next.size(sizeOf)?.let { mapOf(sizeOf to it) } ?: emptyMap() else emptyMap()
+        if (toolChanged) dirtyTool = true
+        // Carry every size still dirty (e.g. a slider preview) plus the one just edited.
+        if (sizeOf != null) dirtySizes += sizeOf
+        val sizes = dirtySizes.mapNotNull { t -> next.size(t)?.let { t to it } }.toMap()
         return app.inkbridge.core.protocol.Payload.ToolRequest(lastSent, if (toolChanged) next.tool else null, sizes)
     }
 
@@ -128,38 +147,54 @@ class ToolSync(initial: ToolSettings) {
         latest = state
         if (state.ack < lastSent) return false
         acked = maxOf(acked, state.ack)
+        if (acked >= lastSent) {
+            dirtyTool = false
+            dirtySizes.clear()
+        }
         revision = state.revision
-        if (state.settings == settings) return false
-        settings = state.settings
+        val next = state.settings.clamped()
+        if (next == settings) return false
+        settings = next
         return true
     }
 
     /**
      * A new connection is ready. The Mac's acks live in its memory, so after a Mac restart
-     * they start again at 0; keeping our old `lastSent` would make us ignore the Mac forever.
-     * - Every edit acknowledged: start over at 0 and adopt whatever the Mac sends.
-     * - Some edit never acknowledged (made offline, or lost with a dead link): send the whole
-     *   current state once, so that edit wins, and wait for its reply.
+     * they start again at 0; a state whose ack is below [lastSent] is skipped by [receive],
+     * and [adoptLatest] then takes the newest Mac state when every edit was acknowledged.
+     * - Every edit acknowledged: adopt whatever the Mac sends (via [adoptLatest]).
+     * - Some edit never acknowledged (made offline, or lost with a dead link): re-send only
+     *   the dirty fields, so a pen change never overwrites a Mac highlighter change.
+     * [lastSent] stays monotonic so a late Mac state with an old ack cannot look like a
+     * reply to a new edit after reconnect.
      * Returns the request to send, if any.
      */
     fun connected(): app.inkbridge.core.protocol.Payload.ToolRequest? {
-        if (acked >= lastSent) {
-            lastSent = 0
-            acked = 0
-            return null
-        }
+        if (acked >= lastSent) return null
         lastSent += 1
-        acked = 0
-        return app.inkbridge.core.protocol.Payload.ToolRequest(lastSent, settings.tool, settings.sizes)
+        val sizes = dirtySizes.mapNotNull { t -> settings.size(t)?.let { t to it } }.toMap()
+        return app.inkbridge.core.protocol.Payload.ToolRequest(
+            lastSent, if (dirtyTool) settings.tool else null, sizes,
+        )
     }
 
-    /** After [connected] returned null: adopts the newest Mac state if it was skipped. True when settings changed. */
+    /**
+     * After [connected] returned null: adopts the newest Mac state if it was skipped.
+     * Re-baselines [lastSent] to the Mac's ack so a restarted Mac (acks back at 0) can
+     * keep updating us, while a late duplicate of an old ack cannot overwrite a new edit.
+     * True when settings changed.
+     */
     fun adoptLatest(): Boolean {
         val st = latest ?: return false
-        if (lastSent != 0L) return false
+        if (acked < lastSent) return false
+        lastSent = st.ack
+        acked = st.ack
+        dirtyTool = false
+        dirtySizes.clear()
         revision = st.revision
-        if (st.settings == settings) return false
-        settings = st.settings
+        val next = st.settings.clamped()
+        if (next == settings) return false
+        settings = next
         return true
     }
 }

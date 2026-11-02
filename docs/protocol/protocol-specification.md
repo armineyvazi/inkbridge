@@ -109,7 +109,9 @@ The device reports its **physical** tool: `pen`, or `eraser` when Android report
 tool selected on its toolbar (pen, highlighter or laser). A device `eraser` always
 erases. Since v0.4 the tablet can also *select* the tool (`tool.request`); the host's
 toolbar and the tablet stay in step through `tool.state`, and the host still resolves
-every stroke (`stroke.style`).
+every stroke (`stroke.style`). For an eraser, `style.width` is the **radius in canvas px**
+(the same value as the eraser size preference). Width must be in `(0.01, 10000]`; `0` is
+rejected and would drop the tablet connection.
 
 ### Tool settings (v0.4)
 
@@ -131,8 +133,9 @@ The tablet applies its own edits at once (optimistic) and ignores a `tool.state`
 `ack` is lower than its latest `seq`: that state answers an edit it has already
 superseded (a slider still moving). The reply to its latest edit carries the merged
 result. Acks are kept per `stream_id`, so a restarted tablet app starts again at 0.
-Offline edits wait in the outbox, are replayed on reconnect, and win over the Mac's
-state at that moment.
+Offline edits wait in the outbox. On reconnect the tablet re-sends only the dirty
+fields (not the whole settings object), so they win per field over the Mac's state
+at that moment without clobbering unrelated sizes.
 
 ## 4. Handshake
 

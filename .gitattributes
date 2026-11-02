@@ -1,0 +1,19 @@
+* text=auto eol=lf
+
+*.swift text
+*.kt text
+*.kts text
+*.md text
+*.json text
+*.yml text
+*.yaml text
+*.sh text eol=lf
+*.bat text eol=crlf
+
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.webp binary
+*.icns binary
+*.jar binary

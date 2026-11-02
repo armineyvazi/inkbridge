@@ -264,8 +264,9 @@ class ConnectActivity : InkActivity() {
             "2. Connect the cable and allow the Mac when asked.\n" +
             "3. On the Mac, run: adb reverse tcp:8765 tcp:8765"), Ink.dp(this, Ink.S))
         c.add(Ink.button(this, "Use USB", Ink.ButtonStyle.PRIMARY, R.drawable.ic_usb) {
+            // update() restarts on mode change; resume only when paused (avoids orphan loops).
             manager.update(manager.settings.copy(mode = ConnectionMode.USB))
-            manager.resume()
+            if (manager.paused.value) manager.resume()
             finish()
         }, Ink.dp(this, Ink.L))
         if (manager.settings.mode == ConnectionMode.USB) {

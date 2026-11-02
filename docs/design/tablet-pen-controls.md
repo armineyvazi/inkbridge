@@ -43,3 +43,4 @@ source of these numbers is `protocol/fixtures/tool-sizes.json`.
 | Laser | dark grey 2 px trail | fixed |
 
 On the Mac the same stored width is drawn `× mapper.scale` in colour, with Catmull-Rom smoothing.
+Eraser `stroke.style.width` is the radius (never 0): the tablet draws the sweep band from it.

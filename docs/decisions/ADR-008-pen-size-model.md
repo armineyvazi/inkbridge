@@ -48,7 +48,8 @@ until the Mac's `stroke.style` arrived. Sizes were not persisted.
   The tablet is optimistic. It skips states whose `ack` is lower than its latest `seq` (replies to
   superseded slider steps). On every new connection it re-baselines (`ToolSync.connected`):
   - everything acknowledged → adopt the Mac's state;
-  - an unacknowledged edit (offline, or lost on a dead link) → re-send the full state, so it wins.
+  - an unacknowledged edit (offline, or lost on a dead link) → re-send only the dirty
+    fields, so a tablet pen change never overwrites a Mac highlighter change.
 - `tool.request` is in the device's resend log, so a size change always reaches the Mac before
   the strokes drawn after it on the same ordered stream.
 
@@ -64,8 +65,9 @@ until the Mac's `stroke.style` arrived. Sizes were not persisted.
 
 ## Validation
 
-- Shared-fixture tests (limits, presets, 9 step vectors) on both platforms; clamp, per-tool memory, wire round-trip, ToolSync ordering, reconnect re-baseline.
+- Shared-fixture tests (limits, presets, 9 step vectors) on both platforms; clamp, per-tool memory, wire round-trip, ToolSync ordering, reconnect re-baseline (dirty fields only).
 - UI test: tool buttons, − / +, next stroke uses the new size, earlier stroke unchanged, persisted.
+- Eraser `stroke.style` carries the radius (`valid/stroke.style.eraser.json`); width 0 is rejected.
 - Hardware (Note Air 2 Plus + Mac, 2026-11-02):
   - widths 4 / 5.5 / 11 drew 4 / 6 / 12 px at 100 %, and 11 drew 16 px at 150 %;
   - the Mac stored 11 for both;

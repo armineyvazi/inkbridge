@@ -33,6 +33,8 @@ import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 
 /** A pairing attempt the user started: where to, and with which code. */
 data class PairingRequest(val name: String, val address: String, val port: Int, val code: String, val pin: ByteArray? = null)
@@ -133,13 +135,18 @@ class ConnectionManager(private val ctx: Context) {
     fun selectTool(t: app.inkbridge.core.protocol.Tool) {
         val cur = toolSync.settings
         if (cur.tool == t) return
-        commitTools(cur.copy(tool = t), toolChanged = true, sizeOf = null)
+        // Flush a size previewed with send=false so a mid-drag tool switch keeps it.
+        commitTools(cur.copy(tool = t), toolChanged = true, sizeOf = toolSync.pendingSize())
     }
 
     /** Sets [t]'s size; only that tool changes. [send] false while a slider is still moving. */
     fun setToolSize(t: app.inkbridge.core.protocol.Tool, size: Double, send: Boolean = true) {
         val next = toolSync.settings.withSize(t, size)
-        if (!send) { _tools.value = next; return }
+        if (!send) {
+            toolSync.preview(next, t)
+            _tools.value = next
+            return
+        }
         commitTools(next, toolChanged = false, sizeOf = t)
     }
 
@@ -282,8 +289,12 @@ class ConnectionManager(private val ctx: Context) {
         Log.i(TAG, "pairing with ${request.name} at ${request.address}:${request.port}")  // never the code
         _paused.value = false
         _pairing.value = request
-        if (settings.mode != ConnectionMode.WIFI) update(settings.copy(mode = ConnectionMode.WIFI))
-        restart()
+        // update() already restarts when the mode flips to Wi-Fi; only restart otherwise.
+        if (settings.mode != ConnectionMode.WIFI) {
+            if (!update(settings.copy(mode = ConnectionMode.WIFI))) restart()
+        } else {
+            restart()
+        }
     }
 
     fun cancelPairing() {
@@ -313,23 +324,34 @@ class ConnectionManager(private val ctx: Context) {
         scope.launch { client.stop() }
     }
 
+    /** Serialises stop/start so overlapping restarts cannot orphan a connection loop. */
+    private val lifecycle = Mutex()
+
     /** Reconnect from scratch (Retry button). */
     fun restart() {
         scope.launch {
-            client.stop()
-            if (running && shouldConnect()) client.start()
+            lifecycle.withLock {
+                client.stop()
+                if (running && shouldConnect()) client.start()
+            }
         }
     }
 
-    fun update(s: AppSettings) {
+    /**
+     * Applies settings. Returns true when the connection was restarted (callers must not
+     * call [restart] / [resume] again — that used to leave two live loops).
+     */
+    fun update(s: AppSettings): Boolean {
         val old = settings
         settings = s
         s.save(ctx)
         _mode.value = s.mode
-        if (old.mode != s.mode || old.usbPort != s.usbPort || old.discovery != s.discovery) {
+        val needsRestart = old.mode != s.mode || old.usbPort != s.usbPort || old.discovery != s.discovery
+        if (needsRestart) {
             if (s.mode == ConnectionMode.WIFI && s.discovery && running) discovery.start() else discovery.stop()
             restart()
         }
+        return needsRestart
     }
 
     fun saveViewport(v: app.inkbridge.core.canvas.Viewport) {

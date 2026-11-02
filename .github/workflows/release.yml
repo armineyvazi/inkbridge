@@ -1,0 +1,73 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    name: Publish GitHub Release
+    runs-on: macos-14
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+          cache: gradle
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Verify tests
+        run: make test-macos
+
+      - name: Android tests and APK
+        working-directory: apps/android
+        run: |
+          echo "sdk.dir=$ANDROID_HOME" > local.properties
+          ./gradlew --no-daemon :core:test :app:testDebugUnitTest :app:assembleDebug
+
+      - name: macOS release binary
+        run: make -C apps/macos release
+
+      - name: Stage artifacts
+        run: |
+          mkdir -p dist
+          VERSION="${GITHUB_REF_NAME}"
+          APK="$HOME/Library/Caches/InkBridge/android-build/app/outputs/apk/debug/app-debug.apk"
+          if [ -f "$APK" ]; then
+            cp "$APK" "dist/InkBridge-${VERSION}-android-debug.apk"
+          fi
+          BIN="$HOME/Library/Caches/InkBridge/macos-build/release/InkBridge"
+          if [ -f "$BIN" ]; then
+            cp "$BIN" "dist/InkBridge-${VERSION}-macos-bin"
+          fi
+          (cd dist && shasum -a 256 * > SHA256SUMS.txt)
+          ls -la dist
+
+      - name: Resolve release notes file
+        id: notes
+        run: |
+          f="docs/release-notes/${GITHUB_REF_NAME}.md"
+          if [ -f "$f" ]; then
+            echo "path=$f" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          draft: false
+          generate_release_notes: true
+          body_path: ${{ steps.notes.outputs.path }}
+          files: |
+            dist/*
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

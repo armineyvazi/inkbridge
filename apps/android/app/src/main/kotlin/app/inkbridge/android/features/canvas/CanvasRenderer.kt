@@ -104,13 +104,20 @@ class CanvasRenderer(private val document: CanvasDocument) {
     fun attach(h: SurfaceHolder, width: Int, height: Int) = handler.post {
         holder = h
         if (cache?.width != width || cache?.height != height) {
+            cache?.recycle()
             cache = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888).also { cacheCanvas = Canvas(it) }
         }
         fullRequested.set(true)
         frame()
     }
 
-    fun detach() = handler.post { holder = null }
+    /** Releases the surface. Recycles the cache: a backgrounded canvas always full-redraws on attach. */
+    fun detach() = handler.post {
+        holder = null
+        cache?.recycle()
+        cache = null
+        cacheCanvas = null
+    }
 
     fun setViewport(v: Viewport) {
         viewport = v
@@ -134,7 +141,20 @@ class CanvasRenderer(private val document: CanvasDocument) {
         schedule()
     }
 
-    fun quit() = thread.quitSafely()
+    fun quit() {
+        handler.post {
+            holder = null
+            cache?.recycle()
+            cache = null
+            cacheCanvas = null
+        }
+        thread.quitSafely()
+    }
+
+    /** Call when this renderer is going away and still owns [document.onChange]. */
+    fun releaseDocumentListener() {
+        document.onChange = null
+    }
 
     private fun schedule() {
         if (scheduled.compareAndSet(false, true)) handler.post(::frame)

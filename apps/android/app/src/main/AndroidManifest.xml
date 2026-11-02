@@ -42,11 +42,14 @@
         </activity>
 
         <!-- configChanges: rotation resizes the surface instead of recreating the
-             activity, so the stroke in progress survives. -->
+             activity, so the stroke in progress survives.
+             singleTop: a second "Open canvas" / Connect→Canvas must not stack a second
+             instance (it would steal document.onChange and leave the first canvas blind). -->
         <activity
             android:name=".features.canvas.CanvasActivity"
             android:configChanges="orientation|screenSize|screenLayout|smallestScreenSize|keyboardHidden"
             android:exported="false"
+            android:launchMode="singleTop"
             android:windowSoftInputMode="adjustNothing" />
 
         <activity android:name=".features.settings.SettingsActivity" android:exported="false" />

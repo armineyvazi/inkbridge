@@ -8,169 +8,196 @@ import InkBridgeCore
 /// runtime state published by `InkCoordinator`.
 /// Toolbar density. Every size keeps the essentials (tool, undo, menu).
 enum ToolbarSize: String, CaseIterable, Identifiable {
-    case expanded, compact, minimal
-    var id: String { rawValue }
-    var title: String { rawValue.capitalized }
+  case expanded, compact, minimal
+  var id: String { rawValue }
+  var title: String { rawValue.capitalized }
 }
 
 /// Where the toolbar sits. Left/right dock vertically.
 enum ToolbarDock: String, CaseIterable, Identifiable {
-    case bottom, top, left, right, floating
-    var id: String { rawValue }
-    var title: String { self == .floating ? "Where I drag it" : rawValue.capitalized }
-    var isVertical: Bool { self == .left || self == .right }
+  case bottom, top, left, right, floating
+  var id: String { rawValue }
+  var title: String { self == .floating ? "Where I drag it" : rawValue.capitalized }
+  var isVertical: Bool { self == .left || self == .right }
 }
 
 final class AppModel: ObservableObject {
-    struct Connection: Equatable {
-        var deviceName: String?
-        var transport: TransportKind?
-        var usbListening = false
-        var wifiListening = false
-        var lastError: String?
-        /// When a tablet last became active (shown as "last connected").
-        var lastConnectedAt: Date?
-        /// Remote address of the active tablet ("Wi-Fi 192.168.1.20").
-        var remote: String?
+  struct Connection: Equatable {
+    var deviceName: String?
+    var transport: TransportKind?
+    var usbListening = false
+    var wifiListening = false
+    var lastError: String?
+    /// When a tablet last became active (shown as "last connected").
+    var lastConnectedAt: Date?
+    /// Remote address of the active tablet ("Wi-Fi 192.168.1.20").
+    var remote: String?
 
-        var isConnected: Bool { deviceName != nil }
+    var isConnected: Bool { deviceName != nil }
+  }
+
+  // Drawing tools
+  // Tool and sizes are preferences (saved, shared with the tablet through `tool.state`),
+  // never document data: a stroke copies its width when it begins. Sizes are canvas px,
+  // the document's unit, so they mean the same thickness at any zoom (see ToolSettings).
+  @Published var tool: Tool {
+    didSet { if tool != oldValue { defaults.set(tool.rawValue, forKey: "tool") } }
+  }
+  @Published var penColor: RGBA = .red
+  @Published var penWidth: Double { didSet { defaults.set(penWidth, forKey: "sizePen") } }
+  @Published var highlighterColor: RGBA = .yellow
+  @Published var highlighterWidth: Double {
+    didSet { defaults.set(highlighterWidth, forKey: "sizeHighlighter") }
+  }
+  @Published var highlighterOpacity: Double = 0.35
+  /// Eraser radius in canvas px.
+  @Published var eraserSize: Double { didSet { defaults.set(eraserSize, forKey: "sizeEraser") } }
+  @Published var overlayVisible = true
+
+  // Runtime status
+  @Published var connection = Connection()
+  @Published var rttMs: Double?
+  @Published var inputLatencyMs: Double?
+  @Published var renderLatencyMs: Double?
+  @Published var canUndo = false
+  @Published var canRedo = false
+  @Published var statusMessage: String?
+
+  // Pairing
+  /// The open Connect Device code, if any.
+  @Published var pairingTicket: PairingTicket?
+  @Published var pairedDevices: [PairedDevice] = []
+  /// Shown so people can compare it with the tablet's diagnostics screen.
+  @Published var hostFingerprint = ""
+  var hostFingerprintHex = ""
+  @Published var hostID = ""
+  /// Set when a pairing completes while the window is open.
+  @Published var justPaired: PairedDevice?
+
+  // Preferences
+  @Published var wifiEnabled: Bool { didSet { defaults.set(wifiEnabled, forKey: "wifiEnabled") } }
+  @Published var transportPreference: PeerArbiter.Preference {
+    didSet { defaults.set(transportPreference.rawValue, forKey: "transportPreference") }
+  }
+  @Published var fit: CoordinateMapper.Fit { didSet { defaults.set(fit.rawValue, forKey: "fit") } }
+  /// Ink, Studio Canvas and toolbar move to the display you last clicked on.
+  /// Off: they stay on `displayID` (or the primary display).
+  @Published var followMouse: Bool { didSet { defaults.set(followMouse, forKey: "followMouse") } }
+  @Published var displayID: CGDirectDisplayID? {
+    didSet { defaults.set(displayID.map { Int($0) }, forKey: "displayID") }
+  }
+  @Published var includeScreenshot: Bool {
+    didSet { defaults.set(includeScreenshot, forKey: "includeScreenshot") }
+  }
+  @Published var fullPageFormat: ExportOptions.ImageFormat {
+    didSet { defaults.set(fullPageFormat.rawValue, forKey: "fullPageFormat") }
+  }
+  @Published var toolbarSize: ToolbarSize {
+    didSet { defaults.set(toolbarSize.rawValue, forKey: "toolbarSize") }
+  }
+  @Published var toolbarDock: ToolbarDock {
+    didSet { defaults.set(toolbarDock.rawValue, forKey: "toolbarDock") }
+  }
+  @Published var toolbarVisible: Bool {
+    didSet { defaults.set(toolbarVisible, forKey: "toolbarVisible") }
+  }
+  /// The view of the infinite canvas currently shown (mirrors the tablet).
+  @Published var viewport: Viewport = .home
+  /// What the Mac's mouse does over the drawing surface (the pen always draws).
+  @Published var pointerMode: PointerMode = .pointer
+  /// Mirror of the Engineering workspace switch, for the toolbar.
+  @Published var engineeringActive = false
+  @Published var journalActive = false
+  /// The journal is open but put away (its canvas and panel are hidden; saving and sync continue).
+  @Published var journalHidden = false
+  /// Mirror of the document's background layer (the store is the source of truth).
+  @Published var background: CanvasBackground = .overlay
+  /// Colour Studio Canvas returns to when toggled on from the overlay.
+  var lastStudioColor: RGBA {
+    get {
+      defaults.string(forKey: "lastStudioColor").flatMap(RGBA.init(hex:)) ?? CanvasBackground.white
     }
+    set { defaults.set(newValue.hex, forKey: "lastStudioColor") }
+  }
 
-    // Drawing tools
-    // Tool and sizes are preferences (saved, shared with the tablet through `tool.state`),
-    // never document data: a stroke copies its width when it begins. Sizes are canvas px,
-    // the document's unit, so they mean the same thickness at any zoom (see ToolSettings).
-    @Published var tool: Tool { didSet { if tool != oldValue { defaults.set(tool.rawValue, forKey: "tool") } } }
-    @Published var penColor: RGBA = .red
-    @Published var penWidth: Double { didSet { defaults.set(penWidth, forKey: "sizePen") } }
-    @Published var highlighterColor: RGBA = .yellow
-    @Published var highlighterWidth: Double { didSet { defaults.set(highlighterWidth, forKey: "sizeHighlighter") } }
-    @Published var highlighterOpacity: Double = 0.35
-    /// Eraser radius in canvas px.
-    @Published var eraserSize: Double { didSet { defaults.set(eraserSize, forKey: "sizeEraser") } }
-    @Published var overlayVisible = true
+  private let defaults: UserDefaults
 
-    // Runtime status
-    @Published var connection = Connection()
-    @Published var rttMs: Double?
-    @Published var inputLatencyMs: Double?
-    @Published var renderLatencyMs: Double?
-    @Published var canUndo = false
-    @Published var canRedo = false
-    @Published var statusMessage: String?
+  init(defaults: UserDefaults = .standard) {
+    self.defaults = defaults
+    wifiEnabled = defaults.object(forKey: "wifiEnabled") as? Bool ?? true
+    transportPreference =
+      PeerArbiter.Preference(rawValue: defaults.string(forKey: "transportPreference") ?? "")
+      ?? .preferUSB
+    fit = CoordinateMapper.Fit(rawValue: defaults.string(forKey: "fit") ?? "") ?? .aspectFit
+    displayID = (defaults.object(forKey: "displayID") as? Int).map { CGDirectDisplayID($0) }
+    followMouse = defaults.object(forKey: "followMouse") as? Bool ?? true
+    includeScreenshot = defaults.bool(forKey: "includeScreenshot")
+    fullPageFormat =
+      ExportOptions.ImageFormat(rawValue: defaults.string(forKey: "fullPageFormat") ?? "") ?? .png
+    toolbarSize = ToolbarSize(rawValue: defaults.string(forKey: "toolbarSize") ?? "") ?? .expanded
+    toolbarDock = ToolbarDock(rawValue: defaults.string(forKey: "toolbarDock") ?? "") ?? .bottom
+    toolbarVisible = defaults.object(forKey: "toolbarVisible") as? Bool ?? true
+    let d = ToolSettings()
+    tool = Tool(rawValue: defaults.string(forKey: "tool") ?? "") ?? d.tool
+    penWidth = ToolSize.pen.clamp(defaults.object(forKey: "sizePen") as? Double ?? d.pen)
+    highlighterWidth = ToolSize.highlighter.clamp(
+      defaults.object(forKey: "sizeHighlighter") as? Double ?? d.highlighter)
+    eraserSize = ToolSize.eraser.clamp(defaults.object(forKey: "sizeEraser") as? Double ?? d.eraser)
+    // v2 kept a permanent code; v3 issues short-lived ones on demand.
+    defaults.removeObject(forKey: "pairingCode")
+  }
 
-    // Pairing
-    /// The open Connect Device code, if any.
-    @Published var pairingTicket: PairingTicket?
-    @Published var pairedDevices: [PairedDevice] = []
-    /// Shown so people can compare it with the tablet's diagnostics screen.
-    @Published var hostFingerprint = ""
-    var hostFingerprintHex = ""
-    @Published var hostID = ""
-    /// Set when a pairing completes while the window is open.
-    @Published var justPaired: PairedDevice?
+  static let palette: [RGBA] = [.red, .blue, .green, .black, .white]
+  static let highlighterPalette: [RGBA] = [
+    .yellow, RGBA(0.45, 0.95, 0.35), RGBA(1, 0.45, 0.75), RGBA(0.35, 0.8, 1),
+  ]
 
-    // Preferences
-    @Published var wifiEnabled: Bool { didSet { defaults.set(wifiEnabled, forKey: "wifiEnabled") } }
-    @Published var transportPreference: PeerArbiter.Preference {
-        didSet { defaults.set(transportPreference.rawValue, forKey: "transportPreference") }
+  /// The selected tool and sizes, as shared with the tablet.
+  var toolSettings: ToolSettings {
+    get {
+      ToolSettings(tool: tool, pen: penWidth, highlighter: highlighterWidth, eraser: eraserSize)
     }
-    @Published var fit: CoordinateMapper.Fit { didSet { defaults.set(fit.rawValue, forKey: "fit") } }
-    /// Ink, Studio Canvas and toolbar move to the display you last clicked on.
-    /// Off: they stay on `displayID` (or the primary display).
-    @Published var followMouse: Bool { didSet { defaults.set(followMouse, forKey: "followMouse") } }
-    @Published var displayID: CGDirectDisplayID? {
-        didSet { defaults.set(displayID.map { Int($0) }, forKey: "displayID") }
+    set {
+      if tool != newValue.tool { tool = newValue.tool }
+      if penWidth != newValue.pen { penWidth = newValue.pen }
+      if highlighterWidth != newValue.highlighter { highlighterWidth = newValue.highlighter }
+      if eraserSize != newValue.eraser { eraserSize = newValue.eraser }
     }
-    @Published var includeScreenshot: Bool { didSet { defaults.set(includeScreenshot, forKey: "includeScreenshot") } }
-    @Published var fullPageFormat: ExportOptions.ImageFormat {
-        didSet { defaults.set(fullPageFormat.rawValue, forKey: "fullPageFormat") }
-    }
-    @Published var toolbarSize: ToolbarSize { didSet { defaults.set(toolbarSize.rawValue, forKey: "toolbarSize") } }
-    @Published var toolbarDock: ToolbarDock { didSet { defaults.set(toolbarDock.rawValue, forKey: "toolbarDock") } }
-    @Published var toolbarVisible: Bool { didSet { defaults.set(toolbarVisible, forKey: "toolbarVisible") } }
-    /// The view of the infinite canvas currently shown (mirrors the tablet).
-    @Published var viewport: Viewport = .home
-    /// What the Mac's mouse does over the drawing surface (the pen always draws).
-    @Published var pointerMode: PointerMode = .pointer
-    /// Mirror of the Engineering workspace switch, for the toolbar.
-    @Published var engineeringActive = false
-    @Published var journalActive = false
-    /// The journal is open but put away (its canvas and panel are hidden; saving and sync continue).
-    @Published var journalHidden = false
-    /// Mirror of the document's background layer (the store is the source of truth).
-    @Published var background: CanvasBackground = .overlay
-    /// Colour Studio Canvas returns to when toggled on from the overlay.
-    var lastStudioColor: RGBA {
-        get { defaults.string(forKey: "lastStudioColor").flatMap(RGBA.init(hex:)) ?? CanvasBackground.white }
-        set { defaults.set(newValue.hex, forKey: "lastStudioColor") }
-    }
+  }
 
-    private let defaults: UserDefaults
-
-    init(defaults: UserDefaults = .standard) {
-        self.defaults = defaults
-        wifiEnabled = defaults.object(forKey: "wifiEnabled") as? Bool ?? true
-        transportPreference = PeerArbiter.Preference(rawValue: defaults.string(forKey: "transportPreference") ?? "") ?? .preferUSB
-        fit = CoordinateMapper.Fit(rawValue: defaults.string(forKey: "fit") ?? "") ?? .aspectFit
-        displayID = (defaults.object(forKey: "displayID") as? Int).map { CGDirectDisplayID($0) }
-        followMouse = defaults.object(forKey: "followMouse") as? Bool ?? true
-        includeScreenshot = defaults.bool(forKey: "includeScreenshot")
-        fullPageFormat = ExportOptions.ImageFormat(rawValue: defaults.string(forKey: "fullPageFormat") ?? "") ?? .png
-        toolbarSize = ToolbarSize(rawValue: defaults.string(forKey: "toolbarSize") ?? "") ?? .expanded
-        toolbarDock = ToolbarDock(rawValue: defaults.string(forKey: "toolbarDock") ?? "") ?? .bottom
-        toolbarVisible = defaults.object(forKey: "toolbarVisible") as? Bool ?? true
-        let d = ToolSettings()
-        tool = Tool(rawValue: defaults.string(forKey: "tool") ?? "") ?? d.tool
-        penWidth = ToolSize.pen.clamp(defaults.object(forKey: "sizePen") as? Double ?? d.pen)
-        highlighterWidth = ToolSize.highlighter.clamp(defaults.object(forKey: "sizeHighlighter") as? Double ?? d.highlighter)
-        eraserSize = ToolSize.eraser.clamp(defaults.object(forKey: "sizeEraser") as? Double ?? d.eraser)
-        // v2 kept a permanent code; v3 issues short-lived ones on demand.
-        defaults.removeObject(forKey: "pairingCode")
+  /// The tool and style for a new stroke, given the device's physical tool.
+  /// The device eraser always erases; otherwise the toolbar selection wins.
+  /// Widths are canvas px (page units), stored on the stroke as they are.
+  func resolve(_ deviceTool: Tool, devicePressure: Bool) -> (Tool, StrokeStyle) {
+    let tool = deviceTool == .eraser ? .eraser : self.tool
+    switch tool {
+    case .pen:
+      return (
+        tool, StrokeStyle(color: penColor, width: penWidth, pressureSensitive: devicePressure)
+      )
+    case .highlighter:
+      var c = highlighterColor
+      c.a = highlighterOpacity
+      return (tool, StrokeStyle(color: c, width: highlighterWidth, pressureSensitive: false))
+    case .laser:
+      return (tool, StrokeStyle(color: RGBA(1, 0.15, 0.1), width: 8, pressureSensitive: false))
+    case .eraser:
+      // Width is the eraser radius in canvas px. The tablet draws the sweep band
+      // from stroke.style; width 0 is outside the protocol range and used to kill
+      // the tablet session when it decoded the Mac's reply (v0.4 regression).
+      return (tool, StrokeStyle(color: .white, width: eraserSize, pressureSensitive: false))
     }
+  }
 
-    static let palette: [RGBA] = [.red, .blue, .green, .black, .white]
-    static let highlighterPalette: [RGBA] = [.yellow, RGBA(0.45, 0.95, 0.35), RGBA(1, 0.45, 0.75), RGBA(0.35, 0.8, 1)]
+  var activeColor: RGBA {
+    tool == .highlighter ? highlighterColor : penColor
+  }
 
-    /// The selected tool and sizes, as shared with the tablet.
-    var toolSettings: ToolSettings {
-        get { ToolSettings(tool: tool, pen: penWidth, highlighter: highlighterWidth, eraser: eraserSize) }
-        set {
-            if tool != newValue.tool { tool = newValue.tool }
-            if penWidth != newValue.pen { penWidth = newValue.pen }
-            if highlighterWidth != newValue.highlighter { highlighterWidth = newValue.highlighter }
-            if eraserSize != newValue.eraser { eraserSize = newValue.eraser }
-        }
-    }
-
-    /// The tool and style for a new stroke, given the device's physical tool.
-    /// The device eraser always erases; otherwise the toolbar selection wins.
-    /// Widths are canvas px (page units), stored on the stroke as they are.
-    func resolve(_ deviceTool: Tool, devicePressure: Bool) -> (Tool, StrokeStyle) {
-        let tool = deviceTool == .eraser ? .eraser : self.tool
-        switch tool {
-        case .pen:
-            return (tool, StrokeStyle(color: penColor, width: penWidth, pressureSensitive: devicePressure))
-        case .highlighter:
-            var c = highlighterColor
-            c.a = highlighterOpacity
-            return (tool, StrokeStyle(color: c, width: highlighterWidth, pressureSensitive: false))
-        case .laser:
-            return (tool, StrokeStyle(color: RGBA(1, 0.15, 0.1), width: 8, pressureSensitive: false))
-        case .eraser:
-            return (tool, StrokeStyle(color: .white, width: 0, pressureSensitive: false))
-        }
-    }
-
-    var activeColor: RGBA {
-        tool == .highlighter ? highlighterColor : penColor
-    }
-
-    func setColor(_ c: RGBA) {
-        if tool == .highlighter { highlighterColor = c } else { penColor = c }
-    }
+  func setColor(_ c: RGBA) {
+    if tool == .highlighter { highlighterColor = c } else { penColor = c }
+  }
 }
 
 extension RGBA {
-    var nsColor: NSColor { NSColor(srgbRed: r, green: g, blue: b, alpha: a) }
+  var nsColor: NSColor { NSColor(srgbRed: r, green: g, blue: b, alpha: a) }
 }
