@@ -5,7 +5,14 @@ import XCTest
 
 /// Writing-path costs on the Mac, per frame and per save. Prints p50/p95 in ms.
 /// Run with `make bench` (release) for numbers comparable to the app.
+///
+/// Timing assertions are skipped under `CI=true`: shared Actions runners are too
+/// noisy for microbenchmarks. Correctness of culling/caching is still checked.
 final class JournalPerformanceTests: XCTestCase {
+  private var assertTimings: Bool {
+    ProcessInfo.processInfo.environment["CI"] != "true"
+  }
+
   static let mapper = CoordinateMapper(
     canvas: CGSize(width: 1512, height: 982), surface: CGSize(width: 1404, height: 1872))
 
@@ -139,7 +146,9 @@ final class JournalPerformanceTests: XCTestCase {
         format:
           "[bench] diagram %d nodes per frame: all p50 %.3f / p95 %.3f ms → dirty-culled p50 %.3f / p95 %.3f ms",
         d.nodes.count, full.p50, full.p95, culled.p50, culled.p95))
-    XCTAssertLessThan(culled.p95, full.p95, "culling to the dirty rect must be cheaper")
+    if assertTimings {
+      XCTAssertLessThan(culled.p95, full.p95, "culling to the dirty rect must be cheaper")
+    }
   }
 
   /// Journal time labels: the old per-frame scan of every point vs the cached anchors.
@@ -199,7 +208,9 @@ final class JournalPerformanceTests: XCTestCase {
         format:
           "[bench] incremental save: append 1 stroke to a 2000-stroke session: p50 %.2f ms p95 %.2f ms",
         app.p50, app.p95))
-    XCTAssertLessThan(app.p95, 20, "an append must not scale with the document")
+    if assertTimings {
+      XCTAssertLessThan(app.p95, 20, "an append must not scale with the document")
+    }
     let loaded = try SessionArchive.load(from: dir).1
     XCTAssertEqual(loaded.count, 2200)
 
@@ -237,6 +248,8 @@ final class JournalPerformanceTests: XCTestCase {
           "[bench] history 400 days: index build p50 %.0f ms (once) · search per keystroke p95 %.2f ms (in memory) vs %.0f ms re-reading disk",
         build.p50, perKey.p95, diskSearch.p50))
     XCTAssertEqual(idx.days.count, 400)
-    XCTAssertLessThan(perKey.p95, diskSearch.p50)
+    if assertTimings {
+      XCTAssertLessThan(perKey.p95, diskSearch.p50)
+    }
   }
 }
