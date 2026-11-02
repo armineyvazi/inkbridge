@@ -16,7 +16,7 @@ concurrency:
 jobs:
   macos:
     name: macOS (Swift)
-    runs-on: macos-14
+    runs-on: macos-15
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -63,7 +63,7 @@ jobs:
 
   e2e-loopback:
     name: E2E loopback
-    runs-on: macos-14
+    runs-on: macos-15
     needs: [macos, android]
     steps:
       - name: Checkout

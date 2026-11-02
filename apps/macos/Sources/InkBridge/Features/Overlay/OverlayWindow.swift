@@ -51,6 +51,10 @@ enum DisplayManager {
     let id: CGDirectDisplayID
     let name: String
     let size: CGSize
+
+    // CGSize was not Hashable on older SDKs used by GitHub's macos-14 image.
+    static func == (lhs: Display, rhs: Display) -> Bool { lhs.id == rhs.id }
+    func hash(into hasher: inout Hasher) { hasher.combine(id) }
   }
 
   static func displayID(of screen: NSScreen) -> CGDirectDisplayID? {
