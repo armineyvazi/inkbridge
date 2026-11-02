@@ -107,7 +107,7 @@ extension SessionArchive {
   }
 
   /// Number of strokes in the log (for the compaction threshold after loading).
-  static func logCount(in dir: URL) -> Int {
+  public static func logCount(in dir: URL) -> Int {
     guard let data = try? Data(contentsOf: dir.appendingPathComponent(logName)) else { return 0 }
     return data.split(separator: 0x0A, omittingEmptySubsequences: true).count
   }

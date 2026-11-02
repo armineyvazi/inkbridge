@@ -1,60 +1,62 @@
 # Daily Journal & Quick Capture
 
-> **v2 (2026-11-01, late):** redesigned panel and History, **hide without leaving** (📖 / ⌃⌥N cycle
-> open → put away → back), handwriting previews, incremental saving. See *Redesign* below and
-> `docs/performance/writing-latency.md`.
+> **v2.1 (2026-11-03):** Hide / Esc / panel close / ⌃⌥N **leave** the journal and restore the
+> previous workspace. Opening forces the canvas on-screen so BOOX ink is visible.
+> History discovers days that only have `strokes.log`. See root-cause notes below.
 
-One click (toolbar 📖, **⌃⌥N**, the menu bar, or 📖 on the BOOX canvas) opens today's page. Write, draw or type a note, then **Done** returns to exactly what was open before.
+One click (toolbar 📖, **⌃⌥N**, the menu bar, or 📖 on the BOOX canvas) opens today's page. Write, draw or type a note, then **Done** (or Esc / Hide / toggle) returns to exactly what was open before.
 
 ## How it works
 
 | Requirement | Implementation |
 |---|---|
 | Restore the previous workspace exactly | Before opening, the open work is saved, then snapshotted **in memory**: strokes, background, diagram, the **undo/redo history**, session, project, title, view, tool, mouse mode and Engineering state (`StrokeStore.snapshot`). Done restores that snapshot; nothing is reloaded or re-created. If the open work can't be saved, the journal does not open. |
-| One document per day | `<journal root>/YYYY/MM/YYYY-MM-DD/`: `journal.json` (title + entries), `session.json` + `strokes.json` (editable ink), `attachments/` |
-| Calendar days, not 24 h | `JournalCalendar` uses the local calendar. A timer fires at the next local midnight, and `NSCalendarDayChanged` / time-zone changes are also handled. An open "today" moves to the new day; a deliberately opened older day stays; previous days are never touched. On launch the date is computed fresh |
-| Timestamps | Every note, task and handwriting session has `createdAt` and `modifiedAt`, stored as **UTC ISO-8601 with milliseconds** and shown in local time. Handwriting is grouped into capture sessions: strokes within 2 minutes of the session's last stroke join it (09:15 → 09:22 is one entry). Erasing or undoing strokes removes them from their entry; timestamps stay with the original content. "Times on page" toggles the HH:mm labels on the canvas |
-| History | Journal History window: month calendar (days with content are bold and shaded, today is outlined), the selected day's entries, search across all days, and Open-and-edit any day |
-| Saving | Ink autosaves through the normal storage path (atomic; "Saved" only after the files are on disk). The page (`journal.json`) is written atomically on every change. Crash recovery reopens the journal day if it was open |
-| Separate storage | Default `~/Documents/InkBridge Journal`, chosen on first use (Use This Folder / Choose…). Projects & Storage → Daily Journal shows the folder, Change… (never moves or deletes; optionally copies existing days), Show in Finder, and usage |
-| BOOX | 📖 opens a panel: Open today, ◀ ▶ days, Go to today, entries with local times, Add note / Add task (keyboard), Close journal. While open, a header shows "Daily Journal · date · Today". The Mac owns the journal: the tablet asks with `journal.request` and shows `journal.state`. Offline it says so, and ink is kept and sent on reconnect |
+| One document per day | `<journal root>/YYYY/MM/YYYY-MM-DD/`: `journal.json` (title + entries), `session.json` + `strokes.json` / `strokes.log` (editable ink), `attachments/` |
+| Same stroke store as Overlay | Journal loads the day into the shared `StrokeStore` / `OverlayView`. There is no separate journal renderer. |
+| Canvas always visible while open | `ensureCanvasOnScreen()` clears "Hide ink", orders the overlay front, and invalidates the stroke cache on open / day switch / leave. |
+| Calendar days, not 24 h | `JournalCalendar` uses the local calendar. A timer fires at the next local midnight, and `NSCalendarDayChanged` / time-zone changes are also handled. |
+| Timestamps | UTC ISO-8601 with milliseconds in `journal.json`; shown in local time. Handwriting sessions group strokes within 2 minutes. |
+| History | `JournalStore.days()` / `JournalIndex` include any day with `journal.json`, `strokes.json`, **or** `strokes.log`. |
+| Saving | Ink via `StorageController` into the day folder (`journalDir`). Page writes coalesce on a background queue. |
+| BOOX | Tablet panel asks with `journal.request`; Mac owns files. Handwriting is normal canvas ink while the Mac journal is active. |
+
+## Leave vs put-away (v2.1)
+
+v2 introduced **hide without leaving**: the canvas was ordered out while the day folder remained the save target. That caused:
+
+1. BOOX writing updated the store and disk but **nothing appeared on the Mac**.
+2. Users thought they had returned to their workspace; Esc / 📖 only put the journal away.
+
+**v2.1:** Hide, Esc, panel close, ⌃⌥N toggle, and tablet **Done** all **leave** (`close()`): save the day, restore the in-memory workspace snapshot, show the canvas.
+
+```mermaid
+sequenceDiagram
+  participant U as User
+  participant J as JournalController
+  participant S as StrokeStore
+  participant W as Overlay window
+  U->>J: open (⌃⌥N)
+  J->>S: snapshot work; load day
+  J->>W: ensureCanvasOnScreen
+  U->>S: BOOX strokes (ingest)
+  S->>W: strokeDidUpdate / draw
+  U->>J: Done / Esc / Hide
+  J->>S: restore snapshot
+  J->>W: ensureCanvasOnScreen
+```
+
+## Root causes fixed (2026-11-03)
+
+| Symptom | Cause | Fix |
+|---|---|---|
+| BOOX ink not on Mac | Canvas ordered out (Hide ink or put-away) while journal still active | Force canvas on open; leave on Hide/Esc |
+| Cannot return to workspace | Toggle cycle open→hide→show never called `close()` | Toggle / Hide / Esc call `close()` |
+| History missing recent days | `days()` ignored `strokes.log`-only folders | `hasContent` includes the log |
+| Blank day after reopen | `try? SessionArchive.load` swallowed errors; incremental `persisted` not seeded from day | Surface load errors; `enterJournal(dir:)` after `startSession` |
 
 ## Not built
 
-- **Backup settings and per-day export.** Save… exports the open day like any session, but there is no dedicated "export journal" yet.
-- **Images and attachments.** The folder exists; there is no UI yet.
-- **Rich typed text on the canvas.** Typed notes live in the panel list, not on the page.
-- **An offline journal on the tablet.** Offline ink goes to whatever document the Mac has open when the tablet reconnects.
-- **Simultaneous edits** are resolved by the Mac applying requests in arrival order.
-
-## Redesign (v2)
-
-Reviewed against Apple Notes, Apple Journal, Goodnotes, Craft, Notion and Obsidian. What we took from them is interaction patterns, not looks:
-- The page is the writing surface. The panel is a narrow companion, never a second editor.
-- One date header with the day relative to today ("TODAY · SUNDAY"), and ‹ › to move between days.
-- One timeline in writing order. Each entry has its time, a small rail dot by kind, and its content. Handwriting shows as a preview of the ink.
-- Actions appear in context: on hover, in a right-click menu, or under ⋯. They don't take permanent space.
-- A single composer at the bottom. Return adds the entry, and the Note/Task switch sits inside the field.
-- A quiet save state: Saved, Saving…, Edited, or a red "Not saved" with the reason.
-
-| Area | Mac | BOOX |
-|---|---|---|
-| Navigation | ‹ date › (click the date for a calendar), Today (⌘T), ⌘[ / ⌘], 🔍 History (⌘F), ⋯ menu | ‹ date › and "Go to today" |
-| Entries | time column, previews of handwriting (click → the page pans to it), editable notes/tasks, hover delete | time column (monospace), ✎ / ☐ / ☑, last 30 |
-| Capture | composer: note ↔ task, Return | Note/Task segmented + field + ✓; a typed draft survives updates |
-| Hide | panel close button, **Hide**, 📖, ⌃⌥N | "Hide on Mac" / "Show on Mac"; leaving the canvas keeps the journal open and the dashboard shows **Continue writing** |
-| Leave | **Done** (⌘Return), menu "Close Daily Journal (Back to Work)" | "Done — back to work" |
-| History | sidebar: search, month (dots on days with entries), day list with counts; detail: the day's timeline with previews, **Open in Journal** | — (the Mac owns history) |
-
-## Hide without leaving
-
-- **Hiding:** puts away the canvas window and the panel. Nothing is unloaded. The day, ink, entries, view, tool, selection, panel scroll and a half-typed draft all stay in memory. A save starts but nothing waits for it. Autosave and tablet sync keep running, so the tablet can keep writing into the hidden journal and every stroke is saved.
-- **Showing:** brings both windows back exactly as they were.
-- **Protocol:** `journal.state` carries `hidden`, and `journal.request` accepts `hide` and `show`.
-- **Verified on the real app** with the simulated tablet. Open, write, add a note, hide, write a stroke and a note while hidden, show, close. The day ends up with 2 strokes and 3 timestamped entries, and the work session is restored with its own title and strokes.
-
-## Bugs found in real use and fixed
-
-- **Work session renamed:** after closing the journal, the work session was renamed "Journal <day>". The title field commits when its panel hides, and the edit landed after close. Edits now require the journal to be open.
-- **Wrong start times:** every session recorded the app's launch time as its start, and the journal day inherited the work session's. Each session now keeps its own start.
-- **Lost draft on the tablet:** a half-typed note on the tablet was lost whenever new ink arrived. The field is now kept across updates (UI test).
+- Backup settings and per-day export.
+- Images / attachments UI.
+- Rich typed text on the canvas.
+- Offline journal ownership on the tablet.

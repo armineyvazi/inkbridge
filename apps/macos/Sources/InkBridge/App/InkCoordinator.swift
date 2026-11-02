@@ -216,8 +216,8 @@ final class InkCoordinator: NSObject {
     let cmd = e.modifierFlags.contains(.command)
     switch (e.keyCode, cmd) {
     case (53, _):  // Esc
-      if workspace.escapeHidesJournal {
-        journal.hide()
+      if workspace.escapeLeavesJournal {
+        journal.close()
       } else if engineering.active {
         setEngineering(false)
       } else {

@@ -40,13 +40,18 @@ final class StorageController: ObservableObject {
     journalDir ?? projectStore.sessionDir(config.activeProject, coordinator.sessionID)
   }
 
-  /// The journal day was just loaded into the canvas: it is what is on disk.
-  func enterJournal(title: String) {
+  /// The journal day was just loaded into the canvas. Call *after* `startSession`
+  /// so `documentReplaced()` has cleared stale project-folder incremental state,
+  /// then seed `persisted` from the day folder (including `strokes.log`) so the
+  /// next autosave appends correctly and status reflects real ink on disk.
+  func enterJournal(title: String, dir: URL) {
     sessionTitle = title
     savedVersion = coordinator.store.documentVersion
-    setStatus(
-      FileManager.default.fileExists(atPath: sessionDir.appendingPathComponent("strokes.json").path)
-        ? .saved(Date()) : .empty)
+    let strokes = coordinator.store.strokes
+    persisted = .init(
+      dir: dir, ids: strokes.map(\.id), background: coordinator.store.background,
+      diagram: coordinator.store.diagram, logCount: SessionArchive.logCount(in: dir))
+    setStatus(strokes.isEmpty ? .empty : .saved(Date()))
   }
 
   /// Back from the journal: the restored document was saved before entering.

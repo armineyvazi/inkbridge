@@ -240,6 +240,9 @@ public final class JournalStore {
   }
 
   /// Days that have a journal page or ink, newest first.
+  ///
+  /// A day with only `strokes.log` (append-only saves that have not compacted yet)
+  /// must appear here — matching [hasContent] — or History silently omits recent writing.
   public func days() -> [String] {
     var out: [String] = []
     for y in (try? fm.contentsOfDirectory(atPath: root.path)) ?? [] where y.count == 4 {
@@ -248,16 +251,19 @@ public final class JournalStore {
           in (try? fm.contentsOfDirectory(
             atPath: root.appendingPathComponent(y).appendingPathComponent(m).path)) ?? []
         where JournalCalendar.isValid(d) {
-          let dir = dayDir(d)
-          if fm.fileExists(atPath: dir.appendingPathComponent("journal.json").path)
-            || fm.fileExists(atPath: dir.appendingPathComponent("strokes.json").path)
-          {
-            out.append(d)
-          }
+          if hasContent(d) { out.append(d) }
         }
       }
     }
     return out.sorted(by: >)
+  }
+
+  /// True when the day folder has a page and/or any ink (full file or append log).
+  public func hasContent(_ day: String) -> Bool {
+    let dir = dayDir(day)
+    return fm.fileExists(atPath: dir.appendingPathComponent("journal.json").path)
+      || fm.fileExists(atPath: dir.appendingPathComponent("strokes.json").path)
+      || fm.fileExists(atPath: dir.appendingPathComponent("strokes.log").path)
   }
 
   public struct SearchHit: Equatable, Sendable {
