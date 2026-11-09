@@ -32,7 +32,7 @@ jobs:
           (cd dist && shasum -a 256 * > SHA256SUMS-macos.txt)
 
       - name: Upload macOS artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: macos-dist
           path: dist/
@@ -73,7 +73,7 @@ jobs:
           (cd dist && sha256sum * > SHA256SUMS-android.txt)
 
       - name: Upload Android artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: android-dist
           path: dist/
